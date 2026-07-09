@@ -105,6 +105,7 @@
   .card.c-falta .bar { background: var(--falta); }
   .card.c-ok .bar { background: var(--ok); }
   .card.c-sin_ficha .bar { background: var(--sinficha); }
+  .card.c-no_trabajo .bar { background: var(--baja); }
   .card.c-baja .bar { background: var(--baja); }
 
   /* ---------- Table ---------- */
@@ -129,6 +130,7 @@
   .pill.falta { background: var(--falta-bg); color: var(--falta); } .pill.falta::before { background: var(--falta); }
   .pill.ok { background: var(--ok-bg); color: var(--ok); } .pill.ok::before { background: var(--ok); }
   .pill.sin_ficha { background: var(--sinficha-bg); color: var(--sinficha); } .pill.sin_ficha::before { background: var(--sinficha); }
+  .pill.no_trabajo { background: #23292f; color: var(--baja); } .pill.no_trabajo::before { background: var(--baja); }
   .tag-baja { background: #23292f; color: var(--baja); border: 1px solid var(--line); padding: 1px 7px; border-radius: 5px; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; margin-left: 6px; }
   .diff-pos { color: var(--extra); } .diff-neg { color: var(--falta); } .diff-zero { color: var(--text-dim); }
 
@@ -513,7 +515,7 @@ el('th-diff').onclick = () => setHorasSort('diff');
 function renderCards(s) {
   const defs = [
     ['all', 'Todos', s.total], ['extra', 'Con extras', s.extra], ['falta', 'Les falta', s.falta],
-    ['ok', 'En jornada', s.ok], ['sin_ficha', 'Sin ficha', s.sin_ficha], ['baja', 'En baja', s.baja],
+    ['ok', 'En jornada', s.ok], ['no_trabajo', 'No trabajó', s.no_trabajo], ['sin_ficha', 'Sin ficha', s.sin_ficha], ['baja', 'En baja', s.baja],
   ];
   el('cards').innerHTML = defs.map(([k, l, n]) =>
     `<button class="card c-${k} ${currentFilter === k ? 'active' : ''}" data-filter="${k}">
@@ -553,7 +555,7 @@ function renderRows(rows) {
   }).join('');
   tb.querySelectorAll('button[data-rid]').forEach((b) => b.onclick = () => openAdjust(b.dataset.rid));
 }
-function labelOf(c) { return { extra: 'Extra', falta: 'Falta', ok: 'En jornada', sin_ficha: 'Sin ficha', sin_datos: 'Sin datos' }[c] || c; }
+function labelOf(c) { return { extra: 'Extra', falta: 'Falta', ok: 'En jornada', no_trabajo: 'No trabajó', sin_ficha: 'Sin ficha', sin_datos: 'Sin datos' }[c] || c; }
 // Si el "nombre" es en realidad un record ID de Airtable (recXXXXXXXX...), no lo mostramos.
 function cleanName(name) {
   if (!name) return '';

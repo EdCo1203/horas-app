@@ -147,12 +147,53 @@ function buildWeekRows(weekId, user, { filter = 'all', q = '' } = {}) {
     });
   }
 
+  // Agregar a los que están en Airtable (activos) pero NO en el CSV de horas:
+  // aparecen con 0 horas y categoría "no_trabajo".
+  const idsEnHoras = new Set(rows.map((r) => String(r.rider_id)));
+  const workersActivos = db
+    .prepare(
+      `SELECT rider_id, nombre, gestor, email, region, vehiculo, estado, horas_contrato, is_baja
+       FROM workers
+       WHERE is_baja = 0`
+    )
+    .all();
+
+  for (const w of workersActivos) {
+    if (idsEnHoras.has(String(w.rider_id))) continue; // ya está (trabajó)
+    // Scoping: el gestor solo ve los suyos.
+    if (!isAdmin && normName(w.gestor) !== myGestor) continue;
+
+    enriched.push({
+      rider_id: w.rider_id,
+      nombre: w.nombre,
+      gestor: w.gestor,
+      email: w.email,
+      region: w.region,
+      ciudad: w.region, // no hay ciudad de CSV; usamos la región de Airtable
+      vehiculo: w.vehiculo,
+      estado_trabajador: w.estado,
+      is_baja: !!w.is_baja,
+      tiene_ficha: true,
+      jornada: w.horas_contrato,
+      h_trabajadas: 0,
+      horas_descontadas: 0,
+      horas_perdonadas: 0,
+      horas_efectivas: 0,
+      diff: w.horas_contrato != null ? -w.horas_contrato : null,
+      clasificacion: 'no_trabajo',
+      justificacion: '',
+      total_pedidos: null,
+      incentivo_total: null,
+    });
+  }
+
   // Filtro por categoría
   const f = (filter || 'all').toLowerCase();
   let filtered = enriched;
   if (f === 'extra') filtered = enriched.filter((x) => x.clasificacion === 'extra');
   else if (f === 'falta') filtered = enriched.filter((x) => x.clasificacion === 'falta');
   else if (f === 'ok') filtered = enriched.filter((x) => x.clasificacion === 'ok');
+  else if (f === 'no_trabajo') filtered = enriched.filter((x) => x.clasificacion === 'no_trabajo');
   else if (f === 'sin_ficha') filtered = enriched.filter((x) => !x.tiene_ficha);
   else if (f === 'baja') filtered = enriched.filter((x) => x.is_baja);
 
@@ -171,6 +212,7 @@ function buildWeekRows(weekId, user, { filter = 'all', q = '' } = {}) {
     extra: enriched.filter((x) => x.clasificacion === 'extra').length,
     falta: enriched.filter((x) => x.clasificacion === 'falta').length,
     ok: enriched.filter((x) => x.clasificacion === 'ok').length,
+    no_trabajo: enriched.filter((x) => x.clasificacion === 'no_trabajo').length,
     sin_ficha: enriched.filter((x) => !x.tiene_ficha).length,
     baja: enriched.filter((x) => x.is_baja).length,
   };
