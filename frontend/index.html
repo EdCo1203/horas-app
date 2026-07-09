@@ -121,6 +121,14 @@
   .num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
   .name { font-weight: 550; }
   .rid { font-family: var(--mono); color: var(--text-faint); font-size: 12px; }
+  .rid-copy {
+    display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 12px;
+    color: var(--accent); background: var(--surface-2); border: 1px solid var(--line);
+    padding: 1px 7px; border-radius: 6px; cursor: pointer; user-select: none; transition: all .12s;
+  }
+  .rid-copy:hover { border-color: var(--accent); background: var(--bg); }
+  .rid-copy svg { width: 11px; height: 11px; opacity: .8; }
+  .rid-copy.copied { color: var(--ok); border-color: var(--ok); }
   .sort-arrow { color: var(--accent); font-size: 11px; }
   .muted { color: var(--text-dim); }
 
@@ -540,7 +548,7 @@ function renderRows(rows) {
     const baja = r.is_baja ? '<span class="tag-baja">baja</span>' : '';
     const pill = `<span class="pill ${r.clasificacion}">${labelOf(r.clasificacion)}</span>`;
     return `<tr>
-      <td><div class="name">${escapeHtml(cleanName(r.nombre) || '—')}${baja}</div><div class="rid">${r.rider_id}${r.region ? ' · ' + r.region : ''}</div></td>
+      <td><div class="name">${escapeHtml(cleanName(r.nombre) || '—')}${baja}</div><div style="margin-top:3px">${ridChip(r.rider_id)}</div></td>
       ${gestorCol}
       <td class="muted">${escapeHtml(r.ciudad || '—')}</td>
       <td class="num">${fmt(r.jornada)}</td>
@@ -562,6 +570,36 @@ function cleanName(name) {
   return /^rec[A-Za-z0-9]{14,}$/.test(String(name).trim()) ? '' : name;
 }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
+// Pastilla con el Rider ID + ícono de copiar. Al clic copia al portapapeles.
+function ridChip(riderId) {
+  const copyIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  return `<span class="rid-copy" data-copy="${riderId}" title="Copiar Rider ID">${riderId} ${copyIcon}</span>`;
+}
+// Copia texto y da feedback visual en el elemento.
+function copyRid(elm) {
+  const val = elm.dataset.copy;
+  const done = () => {
+    elm.classList.add('copied');
+    const orig = elm.innerHTML;
+    elm.innerHTML = '✓ copiado';
+    setTimeout(() => { elm.classList.remove('copied'); elm.innerHTML = orig; }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(val).then(done).catch(() => fallbackCopy(val, done));
+  } else fallbackCopy(val, done);
+}
+function fallbackCopy(text, cb) {
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); } catch {}
+  ta.remove(); cb && cb();
+}
+// Delegación: cualquier clic en una pastilla .rid-copy copia su Rider ID.
+document.addEventListener('click', (e) => {
+  const chip = e.target.closest('.rid-copy');
+  if (chip) { e.stopPropagation(); copyRid(chip); }
+});
 
 // ---------- adjust modal ----------
 function openAdjust(rid) {
@@ -667,7 +705,7 @@ function renderRiders(rows) {
       : r.estado_cuenta === 'Inactivo' ? '<span class="pill falta">Inactivo</span>' : '<span class="muted">—</span>';
     const estadoT = r.is_baja ? `<span class="pill falta">${escapeHtml(r.estado || 'Baja')}</span>` : `<span class="muted">${escapeHtml(r.estado || '—')}</span>`;
     return `<tr>
-      <td><div class="name">${escapeHtml(cleanName(r.nombre) || '—')}</div><div class="rid">${r.rider_id}</div></td>
+      <td><div class="name">${escapeHtml(cleanName(r.nombre) || '—')}</div><div style="margin-top:3px">${ridChip(r.rider_id)}</div></td>
       ${gestorCol}
       <td class="muted">${escapeHtml(r.ciudad || '—')}</td>
       <td class="num">${r.horas_contrato != null ? fmt(r.horas_contrato) : '—'}</td>
