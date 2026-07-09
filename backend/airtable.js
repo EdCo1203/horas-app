@@ -124,7 +124,7 @@ function mapRecord(fields, baseCfg = {}) {
   };
 
   const riderRaw = pick('riderId', 'RIDERID', 'Rider ID', 'RiderId');
-  const nombre = pick('personal', 'Personal', 'nombreCompleto', 'Nombre');
+  const nombre = pick('nombre', 'personal', 'Personal', 'nombreCompleto', 'Nombre');
   const gestorCampo = pick('gestorPersonal', 'gestor', 'Gestor');
   const email = pick('email', 'Email');
   const region = pick('regionPersonal', 'region', 'Region');
