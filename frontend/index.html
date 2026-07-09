@@ -120,6 +120,7 @@
   .num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
   .name { font-weight: 550; }
   .rid { font-family: var(--mono); color: var(--text-faint); font-size: 12px; }
+  .sort-arrow { color: var(--accent); font-size: 11px; }
   .muted { color: var(--text-dim); }
 
   .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
@@ -222,8 +223,8 @@
               <th style="text-align:right">Trabajadas</th>
               <th style="text-align:right">Desc.</th>
               <th style="text-align:right">Perd.</th>
-              <th style="text-align:right">Efectivas</th>
-              <th style="text-align:right">Dif.</th>
+              <th style="text-align:right;cursor:pointer;user-select:none" id="th-efectivas">Efectivas <span class="sort-arrow" id="arrow-efectivas"></span></th>
+              <th style="text-align:right;cursor:pointer;user-select:none" id="th-diff">Dif. <span class="sort-arrow" id="arrow-diff"></span></th>
               <th>Estado</th>
               <th></th>
             </tr>
@@ -253,7 +254,7 @@
               <th>Rider</th>
               <th class="admin-only-col">Gestor</th>
               <th>Ciudad</th>
-              <th style="text-align:right">Jornada</th>
+              <th style="text-align:right;cursor:pointer;user-select:none" id="th-r-jornada">Jornada <span class="sort-arrow" id="arrow-r-jornada"></span></th>
               <th>Estado trabajador</th>
               <th>Cuenta</th>
               <th>Email</th>
@@ -380,6 +381,7 @@ let me = JSON.parse(localStorage.getItem('me') || 'null');
 let currentWeek = null;
 let currentFilter = 'all';
 let currentRows = [];
+let horasSort = { col: null, dir: 1 }; // col: 'efectivas'|'diff', dir: 1 asc / -1 desc
 let adjTarget = null;
 
 // ---------- helpers ----------
@@ -482,8 +484,31 @@ async function loadRows() {
   currentRows = data.rows;
   el('week-range').textContent = data.week ? `Semana ${data.week.date_from} a ${data.week.date_to}` : '';
   renderCards(data.summary);
-  renderRows(data.rows);
+  renderRows(applyHorasSort(currentRows));
 }
+
+// Ordena las filas de Horas según la columna elegida (los sin valor van al final).
+function applyHorasSort(rows) {
+  if (!horasSort.col) return rows;
+  const key = horasSort.col === 'efectivas' ? 'horas_efectivas' : 'diff';
+  return [...rows].sort((a, b) => {
+    const av = a[key], bv = b[key];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;   // nulos al final
+    if (bv == null) return -1;
+    return (av - bv) * horasSort.dir;
+  });
+}
+function setHorasSort(col) {
+  if (horasSort.col === col) horasSort.dir *= -1; // mismo header: invierte
+  else { horasSort.col = col; horasSort.dir = 1; } // nuevo header: menor a mayor
+  // Actualizar flechas
+  el('arrow-efectivas').textContent = col === 'efectivas' ? (horasSort.dir === 1 ? '↑' : '↓') : '';
+  el('arrow-diff').textContent = col === 'diff' ? (horasSort.dir === 1 ? '↑' : '↓') : '';
+  renderRows(applyHorasSort(currentRows));
+}
+el('th-efectivas').onclick = () => setHorasSort('efectivas');
+el('th-diff').onclick = () => setHorasSort('diff');
 
 function renderCards(s) {
   const defs = [
@@ -588,14 +613,34 @@ function ridersQuery() {
   if (el('r-cuenta').value) p.set('cuenta', el('r-cuenta').value);
   return p.toString();
 }
+let ridersRows = [];
+let ridersSort = { col: null, dir: 1 };
 async function loadRiders() {
   try {
     const data = await api('/riders?' + ridersQuery());
     if (!ridersFiltersLoaded) fillRiderFilters(data.filtros);
-    renderRiders(data.rows);
+    ridersRows = data.rows;
+    renderRiders(applyRidersSort(ridersRows));
     el('r-count').textContent = data.total + ' rider' + (data.total === 1 ? '' : 's');
   } catch (e) { console.error(e); }
 }
+function applyRidersSort(rows) {
+  if (!ridersSort.col) return rows;
+  return [...rows].sort((a, b) => {
+    const av = a.horas_contrato, bv = b.horas_contrato;
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return (av - bv) * ridersSort.dir;
+  });
+}
+function setRidersSort(col) {
+  if (ridersSort.col === col) ridersSort.dir *= -1;
+  else { ridersSort.col = col; ridersSort.dir = 1; }
+  el('arrow-r-jornada').textContent = ridersSort.dir === 1 ? '↑' : '↓';
+  renderRiders(applyRidersSort(ridersRows));
+}
+el('th-r-jornada').onclick = () => setRidersSort('jornada');
 function fillRiderFilters(f) {
   const set = (id, values, label, fmtFn) => {
     const sel = el(id);
