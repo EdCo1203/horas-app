@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Control de Horas</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --surface: #161c24;
+    --surface-2: #1d252f;
+    --line: #2a3441;
+    --line-soft: #222b36;
+    --text: #e6edf3;
+    --text-dim: #8b98a8;
+    --text-faint: #5b6675;
+    --accent: #4f9dde;
+    --accent-dim: #2d5f85;
+    --extra: #e0a641;      /* horas de más */
+    --extra-bg: #2a2312;
+    --falta: #e0614f;      /* horas de menos */
+    --falta-bg: #2a1614;
+    --ok: #4bb377;         /* en jornada */
+    --ok-bg: #12241a;
+    --sinficha: #8b7bd8;
+    --sinficha-bg: #1e1a2e;
+    --baja: #6b7685;
+    --mono: 'SF Mono', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--sans); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.45; }
+  button { font-family: inherit; cursor: pointer; }
+  input, select { font-family: inherit; }
+  .hidden { display: none !important; }
+
+  /* ---------- Login ---------- */
+  #login-view {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;
+  }
+  .login-card {
+    width: 100%; max-width: 380px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 12px; padding: 36px 32px;
+  }
+  .login-card h1 { font-size: 20px; font-weight: 650; letter-spacing: -0.3px; margin-bottom: 4px; }
+  .login-card .sub { color: var(--text-dim); font-size: 13px; margin-bottom: 28px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; font-weight: 500; }
+  .field input {
+    width: 100%; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; color: var(--text); font-size: 14px; outline: none;
+  }
+  .field input:focus { border-color: var(--accent); }
+  .btn {
+    background: var(--accent); color: #04121f; border: none; padding: 10px 16px; border-radius: 8px;
+    font-weight: 600; font-size: 14px; width: 100%;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn.secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); }
+  .btn.small { width: auto; padding: 6px 12px; font-size: 13px; }
+  .err { color: var(--falta); font-size: 13px; margin-top: 12px; min-height: 18px; }
+
+  /* ---------- App shell ---------- */
+  #app-view { display: none; min-height: 100vh; }
+  header.topbar {
+    display: flex; align-items: center; gap: 16px; padding: 12px 20px;
+    background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 10;
+  }
+  .brand { font-weight: 650; letter-spacing: -0.3px; font-size: 15px; }
+  .brand .dot { color: var(--accent); }
+  .who { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-dim); }
+  .role-badge { background: var(--surface-2); border: 1px solid var(--line); padding: 2px 9px; border-radius: 999px; font-size: 11px; color: var(--text); text-transform: uppercase; letter-spacing: 0.5px; }
+  .tabs { display: flex; gap: 4px; padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--line); }
+  .tab {
+    background: none; border: none; color: var(--text-dim); padding: 11px 14px; font-size: 13px; font-weight: 500;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab:hover { color: var(--text); }
+  main { padding: 20px; max-width: 1400px; margin: 0 auto; }
+
+  /* ---------- Controls row ---------- */
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 18px; }
+  .controls select, .controls input[type=text] {
+    padding: 8px 11px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    color: var(--text); font-size: 13px; outline: none;
+  }
+  .controls input[type=text] { min-width: 220px; }
+  .controls select:focus, .controls input:focus { border-color: var(--accent); }
+  .weeklabel { color: var(--text-dim); font-size: 12px; }
+
+  /* ---------- Summary cards / filter pills ---------- */
+  .cards { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+  .card {
+    flex: 1; min-width: 120px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px; text-align: left; position: relative; transition: border-color .12s;
+  }
+  .card:hover { border-color: var(--accent-dim); }
+  .card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .card .n { font-size: 24px; font-weight: 680; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; }
+  .card .l { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.6px; margin-top: 2px; }
+  .card .bar { position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; }
+  .card.c-all .bar { background: var(--accent); }
+  .card.c-extra .bar { background: var(--extra); }
+  .card.c-falta .bar { background: var(--falta); }
+  .card.c-ok .bar { background: var(--ok); }
+  .card.c-sin_ficha .bar { background: var(--sinficha); }
+  .card.c-baja .bar { background: var(--baja); }
+
+  /* ---------- Table ---------- */
+  .table-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-faint);
+    padding: 10px 12px; border-bottom: 1px solid var(--line); font-weight: 600; background: var(--surface-2); white-space: nowrap;
+  }
+  tbody td { padding: 9px 12px; border-bottom: 1px solid var(--line-soft); font-size: 13px; vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--surface-2); }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+  .name { font-weight: 550; }
+  .rid { font-family: var(--mono); color: var(--text-faint); font-size: 12px; }
+  .muted { color: var(--text-dim); }
+
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .pill::before { content:''; width: 6px; height: 6px; border-radius: 50%; }
+  .pill.extra { background: var(--extra-bg); color: var(--extra); } .pill.extra::before { background: var(--extra); }
+  .pill.falta { background: var(--falta-bg); color: var(--falta); } .pill.falta::before { background: var(--falta); }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); } .pill.ok::before { background: var(--ok); }
+  .pill.sin_ficha { background: var(--sinficha-bg); color: var(--sinficha); } .pill.sin_ficha::before { background: var(--sinficha); }
+  .tag-baja { background: #23292f; color: var(--baja); border: 1px solid var(--line); padding: 1px 7px; border-radius: 5px; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; margin-left: 6px; }
+  .diff-pos { color: var(--extra); } .diff-neg { color: var(--falta); } .diff-zero { color: var(--text-dim); }
+
+  .link-btn { background: none; border: 1px solid var(--line); color: var(--accent); padding: 4px 10px; border-radius: 6px; font-size: 12px; }
+  .link-btn:hover { border-color: var(--accent); }
+
+  /* ---------- Modal ---------- */
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+  .modal { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; width: 100%; max-width: 460px; padding: 24px; }
+  .modal h3 { font-size: 16px; margin-bottom: 4px; }
+  .modal .msub { color: var(--text-dim); font-size: 12px; margin-bottom: 18px; }
+  .modal .row2 { display: flex; gap: 12px; }
+  .modal .row2 .field { flex: 1; }
+  .modal textarea { width: 100%; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; color: var(--text); font-size: 13px; resize: vertical; min-height: 70px; outline: none; font-family: inherit; }
+  .modal textarea:focus { border-color: var(--accent); }
+  .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+  .modal-actions .btn { width: auto; flex: 1; }
+  .calc-line { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; margin: 4px 0 8px; display: flex; justify-content: space-between; font-family: var(--mono); }
+
+  /* ---------- Admin panels ---------- */
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; margin-bottom: 18px; }
+  .panel h2 { font-size: 15px; margin-bottom: 4px; }
+  .panel .psub { color: var(--text-dim); font-size: 12px; margin-bottom: 16px; }
+  .upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .upload-grid { grid-template-columns: 1fr; } }
+  .drop { border: 1px dashed var(--line); border-radius: 10px; padding: 16px; }
+  .drop h4 { font-size: 13px; margin-bottom: 8px; }
+  .inline-fields { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; margin-top: 10px; }
+  .inline-fields .field { margin-bottom: 0; }
+  .inline-fields .field input { padding: 7px 10px; }
+  .status-msg { font-size: 12px; margin-top: 10px; min-height: 16px; }
+  .status-msg.ok { color: var(--ok); } .status-msg.bad { color: var(--falta); }
+  .file-input { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+  .toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface-2); border: 1px solid var(--line); border-left: 3px solid var(--ok); padding: 12px 16px; border-radius: 8px; font-size: 13px; z-index: 80; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login-view">
+  <div class="login-card">
+    <h1>Control de Horas<span style="color:var(--accent)">.</span></h1>
+    <p class="sub">Ingresá con tu cuenta para ver las horas de la semana.</p>
+    <div class="field">
+      <label>Correo</label>
+      <input id="li-email" type="email" autocomplete="username" placeholder="tucorreo@empresa.com" />
+    </div>
+    <div class="field">
+      <label>Contraseña</label>
+      <input id="li-pass" type="password" autocomplete="current-password" placeholder="••••••••" />
+    </div>
+    <button class="btn" id="li-btn">Entrar</button>
+    <div class="err" id="li-err"></div>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app-view">
+  <header class="topbar">
+    <span class="brand">Control de Horas<span class="dot">.</span></span>
+    <div class="who">
+      <span id="who-name"></span>
+      <span class="role-badge" id="who-role"></span>
+      <button class="link-btn" id="logout-btn">Salir</button>
+    </div>
+  </header>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="horas">Horas</button>
+    <button class="tab" data-tab="riders">Riders</button>
+    <button class="tab admin-only" data-tab="cargar">Cargar datos</button>
+    <button class="tab admin-only" data-tab="usuarios">Usuarios</button>
+  </nav>
+
+  <main>
+    <!-- ---- TAB HORAS ---- -->
+    <section id="tab-horas">
+      <div class="controls">
+        <select id="week-select"></select>
+        <span class="weeklabel" id="week-range"></span>
+        <input type="text" id="search" placeholder="Buscar por nombre o Rider ID…" />
+        <button class="link-btn" id="btn-export-horas">↓ Descargar CSV</button>
+      </div>
+      <div class="cards" id="cards"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Trabajador</th>
+              <th class="admin-only-col">Gestor</th>
+              <th>Ciudad</th>
+              <th style="text-align:right">Jornada</th>
+              <th style="text-align:right">Trabajadas</th>
+              <th style="text-align:right">Desc.</th>
+              <th style="text-align:right">Perd.</th>
+              <th style="text-align:right">Efectivas</th>
+              <th style="text-align:right">Dif.</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p class="muted" id="rows-empty" style="padding:24px;text-align:center;display:none">No hay filas para este filtro.</p>
+    </section>
+
+    <!-- ---- TAB RIDERS ---- -->
+    <section id="tab-riders" class="hidden">
+      <div class="controls">
+        <input type="text" id="r-search" placeholder="Buscar por nombre o Rider ID…" />
+        <select id="r-ciudad"><option value="">Todas las ciudades</option></select>
+        <select id="r-jornada"><option value="">Toda jornada</option></select>
+        <select id="r-estado"><option value="">Todo estado</option></select>
+        <select id="r-cuenta"><option value="">Toda cuenta</option></select>
+        <button class="link-btn" id="r-clear">Limpiar</button>
+        <button class="link-btn" id="btn-export-riders">↓ Descargar CSV</button>
+        <span class="weeklabel" id="r-count"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Rider</th>
+              <th class="admin-only-col">Gestor</th>
+              <th>Ciudad</th>
+              <th style="text-align:right">Jornada</th>
+              <th>Estado trabajador</th>
+              <th>Cuenta</th>
+              <th>Email</th>
+            </tr>
+          </thead>
+          <tbody id="r-rows"></tbody>
+        </table>
+      </div>
+      <p class="muted" id="r-empty" style="padding:24px;text-align:center;display:none">No hay riders para estos filtros. ¿Sincronizaste desde Airtable?</p>
+    </section>
+
+    <!-- ---- TAB CARGAR ---- -->
+    <section id="tab-cargar" class="hidden">
+      <div class="panel">
+        <h2>Cargar datos</h2>
+        <p class="psub">Sincronizá el personal desde Airtable y subí las horas de la semana en CSV. El sistema cruza por Rider ID.</p>
+        <div class="upload-grid">
+          <div class="drop">
+            <h4>1 · Personal (Airtable)</h4>
+            <p class="muted" style="font-size:12px;margin-bottom:10px">Trae nombres, gestores, jornada y estado directo de Airtable. Solo lectura.</p>
+            <button class="btn small secondary" id="btn-sync">Sincronizar desde Airtable</button>
+            <div class="muted" id="sync-meta" style="font-size:11px;margin-top:8px"></div>
+            <div class="status-msg" id="status-personal"></div>
+            <div id="sync-log" style="margin-top:14px"></div>
+          </div>
+          <div class="drop">
+            <h4>2 · Horas de la semana</h4>
+            <p class="muted" style="font-size:12px;margin-bottom:10px">CSV de incentivos. Indicá de qué día a qué día es la semana.</p>
+            <input class="file-input" type="file" id="file-hours" accept=".csv" />
+            <div class="inline-fields">
+              <div class="field"><label>Desde</label><input type="date" id="date-from" /></div>
+              <div class="field"><label>Hasta</label><input type="date" id="date-to" /></div>
+              <div class="field"><label>Etiqueta</label><input type="text" id="week-label" placeholder="W26" style="width:80px" /></div>
+            </div>
+            <div style="margin-top:12px"><button class="btn small" id="btn-hours">Importar horas</button></div>
+            <div class="status-msg" id="status-hours"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---- TAB USUARIOS ---- -->
+    <section id="tab-usuarios" class="hidden">
+      <div class="panel">
+        <h2>Nuevo usuario</h2>
+        <p class="psub">Asigná a cada gestor su nombre tal como aparece en Airtable, para que solo vea a sus trabajadores.</p>
+        <div class="inline-fields">
+          <div class="field"><label>Correo</label><input type="email" id="nu-email" placeholder="gestor@empresa.com" /></div>
+          <div class="field"><label>Contraseña</label><input type="text" id="nu-pass" placeholder="temporal" /></div>
+          <div class="field"><label>Rol</label>
+            <select id="nu-role"><option value="gestor">Gestor</option><option value="admin">Admin</option></select>
+          </div>
+          <div class="field" id="nu-gestor-wrap"><label>Nombre de gestor (Airtable)</label>
+            <select id="nu-gestor"></select>
+          </div>
+          <button class="btn small" id="btn-newuser">Crear</button>
+        </div>
+        <div class="status-msg" id="status-user"></div>
+      </div>
+      <div class="controls" style="margin-bottom:12px">
+        <input type="text" id="u-search" placeholder="Buscar por correo, rol o gestor…" style="min-width:280px" />
+        <span class="weeklabel" id="u-count"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Correo</th><th>Rol</th><th>Gestor asignado</th><th>Estado</th><th style="text-align:right">Acciones</th></tr></thead>
+          <tbody id="users-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ============ MODAL AJUSTE ============ -->
+<div class="modal-bg hidden" id="adjust-modal">
+  <div class="modal">
+    <h3 id="adj-name">—</h3>
+    <p class="msub" id="adj-info">—</p>
+    <div class="row2">
+      <div class="field"><label>Horas a descontar</label><input type="number" step="0.01" min="0" id="adj-desc" value="0" /></div>
+      <div class="field"><label>Horas a perdonar</label><input type="number" step="0.01" min="0" id="adj-perd" value="0" /></div>
+    </div>
+    <div class="calc-line"><span>Horas efectivas</span><span id="adj-efectivas">—</span></div>
+    <div class="calc-line"><span>Diferencia vs jornada</span><span id="adj-diff">—</span></div>
+    <div class="field"><label>Justificación</label><textarea id="adj-just" placeholder="Motivo del ajuste (baja médica, permiso, error de fichaje…)"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="adj-cancel">Cancelar</button>
+      <button class="btn" id="adj-save">Guardar ajuste</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODAL EDITAR USUARIO ============ -->
+<div class="modal-bg hidden" id="user-modal">
+  <div class="modal">
+    <h3 id="um-title">Editar usuario</h3>
+    <p class="msub" id="um-email">—</p>
+    <div class="row2">
+      <div class="field"><label>Rol</label>
+        <select id="um-role"><option value="gestor">Gestor</option><option value="admin">Admin</option></select>
+      </div>
+      <div class="field" id="um-gestor-wrap"><label>Nombre de gestor (Airtable)</label>
+        <select id="um-gestor"></select>
+      </div>
+    </div>
+    <div class="field"><label>Nueva contraseña <span class="muted">(dejá vacío para no cambiarla)</span></label>
+      <input type="text" id="um-pass" placeholder="••••••••" />
+    </div>
+    <div class="calc-line"><span>Estado de acceso</span>
+      <span><label style="cursor:pointer"><input type="checkbox" id="um-active" style="vertical-align:middle"> Activo</label></span>
+    </div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="um-cancel">Cancelar</button>
+      <button class="btn" id="um-save">Guardar</button>
+    </div>
+    <div class="status-msg" id="um-status" style="text-align:center"></div>
+  </div>
+</div>
+
+<script>
+const API = '/api';
+let token = localStorage.getItem('token') || null;
+let me = JSON.parse(localStorage.getItem('me') || 'null');
+let currentWeek = null;
+let currentFilter = 'all';
+let currentRows = [];
+let adjTarget = null;
+
+// ---------- helpers ----------
+function api(path, opts = {}) {
+  return fetch(API + path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(opts.headers || {}) },
+  }).then(async (r) => {
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Error ' + r.status);
+    return data;
+  });
+}
+function fmt(n) { return n == null ? '—' : Number(n).toFixed(2); }
+function el(id) { return document.getElementById(id); }
+function toast(msg) {
+  const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 2600);
+}
+// Descarga un CSV desde una ruta protegida (manda el token y guarda el archivo).
+async function downloadCsv(path, fallbackName) {
+  try {
+    const r = await fetch(API + path, { headers: { Authorization: 'Bearer ' + token } });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Error ' + r.status); }
+    const blob = await r.blob();
+    // Nombre del archivo: usa el que manda el servidor si está.
+    let name = fallbackName;
+    const cd = r.headers.get('Content-Disposition');
+    const m = cd && cd.match(/filename="?([^"]+)"?/);
+    if (m) name = m[1];
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click();
+    a.remove(); URL.revokeObjectURL(url);
+  } catch (e) { alert('No se pudo descargar: ' + e.message); }
+}
+
+// ---------- login ----------
+el('li-btn').onclick = doLogin;
+el('li-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+async function doLogin() {
+  el('li-err').textContent = '';
+  try {
+    const res = await api('/login', { method: 'POST', body: JSON.stringify({ email: el('li-email').value.trim(), password: el('li-pass').value }) });
+    token = res.token; me = res.user;
+    localStorage.setItem('token', token); localStorage.setItem('me', JSON.stringify(me));
+    enterApp();
+  } catch (e) { el('li-err').textContent = e.message; }
+}
+el('logout-btn').onclick = () => { localStorage.clear(); token = null; me = null; location.reload(); };
+
+function enterApp() {
+  el('login-view').style.display = 'none';
+  el('app-view').style.display = 'block';
+  el('who-name').textContent = me.display_name || me.email;
+  el('who-role').textContent = me.role;
+  const isAdmin = me.role === 'admin';
+  document.querySelectorAll('.admin-only').forEach((n) => n.classList.toggle('hidden', !isAdmin));
+  document.querySelectorAll('.admin-only-col').forEach((n) => n.style.display = isAdmin ? '' : 'none');
+  loadWeeks();
+  if (isAdmin) { loadGestores(); loadUsers(); loadSyncStatus(); }
+}
+
+// ---------- tabs ----------
+document.querySelectorAll('.tab').forEach((t) => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
+  t.classList.add('active');
+  ['horas', 'riders', 'cargar', 'usuarios'].forEach((name) => el('tab-' + name).classList.toggle('hidden', name !== t.dataset.tab));
+  if (t.dataset.tab === 'riders') loadRiders();
+});
+
+// ---------- weeks + rows ----------
+async function loadWeeks() {
+  const weeks = await api('/weeks');
+  const sel = el('week-select'); sel.innerHTML = '';
+  if (!weeks.length) { sel.innerHTML = '<option>Sin semanas cargadas</option>'; el('rows').innerHTML=''; return; }
+  weeks.forEach((w) => {
+    const o = document.createElement('option');
+    o.value = w.id; o.textContent = (w.label ? w.label + ' · ' : '') + w.date_from + ' → ' + w.date_to;
+    sel.appendChild(o);
+  });
+  currentWeek = weeks[0].id;
+  sel.value = currentWeek;
+  sel.onchange = () => { currentWeek = +sel.value; loadRows(); };
+  loadRows();
+}
+
+el('search').addEventListener('input', debounce(loadRows, 250));
+el('btn-export-horas').onclick = () => {
+  if (!currentWeek) return;
+  const q = encodeURIComponent(el('search').value.trim());
+  downloadCsv(`/weeks/${currentWeek}/export?filter=${currentFilter}&q=${q}`, 'horas.csv');
+};
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+async function loadRows() {
+  if (!currentWeek) return;
+  const q = encodeURIComponent(el('search').value.trim());
+  const data = await api(`/weeks/${currentWeek}/rows?filter=${currentFilter}&q=${q}`);
+  currentRows = data.rows;
+  el('week-range').textContent = data.week ? `Semana ${data.week.date_from} a ${data.week.date_to}` : '';
+  renderCards(data.summary);
+  renderRows(data.rows);
+}
+
+function renderCards(s) {
+  const defs = [
+    ['all', 'Todos', s.total], ['extra', 'Con extras', s.extra], ['falta', 'Les falta', s.falta],
+    ['ok', 'En jornada', s.ok], ['sin_ficha', 'Sin ficha', s.sin_ficha], ['baja', 'En baja', s.baja],
+  ];
+  el('cards').innerHTML = defs.map(([k, l, n]) =>
+    `<button class="card c-${k} ${currentFilter === k ? 'active' : ''}" data-filter="${k}">
+       <span class="bar"></span><div class="n">${n}</div><div class="l">${l}</div>
+     </button>`).join('');
+  document.querySelectorAll('.card').forEach((c) => c.onclick = () => { currentFilter = c.dataset.filter; loadRows(); });
+}
+
+function diffCell(d) {
+  if (d == null) return '<span class="diff-zero">—</span>';
+  const cls = d > 0 ? 'diff-pos' : d < 0 ? 'diff-neg' : 'diff-zero';
+  const sign = d > 0 ? '+' : '';
+  return `<span class="${cls}">${sign}${d.toFixed(2)}</span>`;
+}
+
+function renderRows(rows) {
+  const tb = el('rows'); const isAdmin = me.role === 'admin';
+  el('rows-empty').style.display = rows.length ? 'none' : 'block';
+  tb.innerHTML = rows.map((r) => {
+    const canAdjust = r.tiene_ficha;
+    const gestorCol = isAdmin ? `<td class="muted">${r.gestor || '—'}</td>` : '';
+    const baja = r.is_baja ? '<span class="tag-baja">baja</span>' : '';
+    const pill = `<span class="pill ${r.clasificacion}">${labelOf(r.clasificacion)}</span>`;
+    return `<tr>
+      <td><div class="name">${escapeHtml(cleanName(r.nombre) || '—')}${baja}</div><div class="rid">${r.rider_id}${r.region ? ' · ' + r.region : ''}</div></td>
+      ${gestorCol}
+      <td class="muted">${escapeHtml(r.ciudad || '—')}</td>
+      <td class="num">${fmt(r.jornada)}</td>
+      <td class="num">${fmt(r.h_trabajadas)}</td>
+      <td class="num muted">${r.horas_descontadas ? fmt(r.horas_descontadas) : '·'}</td>
+      <td class="num muted">${r.horas_perdonadas ? fmt(r.horas_perdonadas) : '·'}</td>
+      <td class="num">${fmt(r.horas_efectivas)}</td>
+      <td class="num">${diffCell(r.diff)}</td>
+      <td>${pill}${r.justificacion ? ' <span title="'+escapeHtml(r.justificacion)+'" class="muted">✎</span>' : ''}</td>
+      <td>${canAdjust ? `<button class="link-btn" data-rid="${r.rider_id}">Ajustar</button>` : ''}</td>
+    </tr>`;
+  }).join('');
+  tb.querySelectorAll('button[data-rid]').forEach((b) => b.onclick = () => openAdjust(b.dataset.rid));
+}
+function labelOf(c) { return { extra: 'Extra', falta: 'Falta', ok: 'En jornada', sin_ficha: 'Sin ficha', sin_datos: 'Sin datos' }[c] || c; }
+// Si el "nombre" es en realidad un record ID de Airtable (recXXXXXXXX...), no lo mostramos.
+function cleanName(name) {
+  if (!name) return '';
+  return /^rec[A-Za-z0-9]{14,}$/.test(String(name).trim()) ? '' : name;
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
+
+// ---------- adjust modal ----------
+function openAdjust(rid) {
+  const r = currentRows.find((x) => x.rider_id === rid); if (!r) return;
+  adjTarget = r;
+  el('adj-name').textContent = cleanName(r.nombre) || r.rider_id;
+  el('adj-info').textContent = `Rider ${r.rider_id} · Jornada ${fmt(r.jornada)}h · Trabajadas ${fmt(r.h_trabajadas)}h`;
+  el('adj-desc').value = r.horas_descontadas || 0;
+  el('adj-perd').value = r.horas_perdonadas || 0;
+  el('adj-just').value = r.justificacion || '';
+  recalcAdjust();
+  el('adjust-modal').classList.remove('hidden');
+}
+function recalcAdjust() {
+  const r = adjTarget; if (!r) return;
+  const desc = parseFloat(el('adj-desc').value) || 0;
+  const perd = parseFloat(el('adj-perd').value) || 0;
+  const efec = (r.h_trabajadas || 0) + perd - desc;
+  const diff = r.jornada != null ? efec - r.jornada : null;
+  el('adj-efectivas').textContent = efec.toFixed(2) + ' h';
+  el('adj-diff').textContent = diff == null ? '—' : (diff > 0 ? '+' : '') + diff.toFixed(2) + ' h';
+  el('adj-diff').style.color = diff == null ? '' : diff > 0 ? 'var(--extra)' : diff < 0 ? 'var(--falta)' : 'var(--ok)';
+}
+el('adj-desc').addEventListener('input', recalcAdjust);
+el('adj-perd').addEventListener('input', recalcAdjust);
+el('adj-cancel').onclick = () => el('adjust-modal').classList.add('hidden');
+el('adj-save').onclick = async () => {
+  try {
+    await api(`/weeks/${currentWeek}/rows/${adjTarget.rider_id}/adjust`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        horas_descontadas: parseFloat(el('adj-desc').value) || 0,
+        horas_perdonadas: parseFloat(el('adj-perd').value) || 0,
+        justificacion: el('adj-just').value.trim(),
+      }),
+    });
+    el('adjust-modal').classList.add('hidden');
+    toast('Ajuste guardado');
+    loadRows();
+  } catch (e) { alert(e.message); }
+};
+
+// ---------- riders (apartado de personal) ----------
+let ridersFiltersLoaded = false;
+function ridersQuery() {
+  const p = new URLSearchParams();
+  if (el('r-search').value.trim()) p.set('q', el('r-search').value.trim());
+  if (el('r-ciudad').value) p.set('ciudad', el('r-ciudad').value);
+  if (el('r-jornada').value) p.set('jornada', el('r-jornada').value);
+  if (el('r-estado').value) p.set('estado', el('r-estado').value);
+  if (el('r-cuenta').value) p.set('cuenta', el('r-cuenta').value);
+  return p.toString();
+}
+async function loadRiders() {
+  try {
+    const data = await api('/riders?' + ridersQuery());
+    if (!ridersFiltersLoaded) fillRiderFilters(data.filtros);
+    renderRiders(data.rows);
+    el('r-count').textContent = data.total + ' rider' + (data.total === 1 ? '' : 's');
+  } catch (e) { console.error(e); }
+}
+function fillRiderFilters(f) {
+  const set = (id, values, label, fmtFn) => {
+    const sel = el(id);
+    const current = sel.value;
+    sel.innerHTML = `<option value="">${label}</option>` +
+      values.map((v) => `<option value="${escapeHtml(String(v))}">${escapeHtml(fmtFn ? fmtFn(v) : String(v))}</option>`).join('');
+    sel.value = current;
+  };
+  set('r-ciudad', f.ciudades, 'Todas las ciudades');
+  set('r-jornada', f.jornadas, 'Toda jornada', (v) => v + 'h');
+  set('r-estado', f.estados, 'Todo estado');
+  set('r-cuenta', f.cuentas, 'Toda cuenta');
+  ridersFiltersLoaded = true;
+}
+function renderRiders(rows) {
+  const isAdmin = me.role === 'admin';
+  el('r-empty').style.display = rows.length ? 'none' : 'block';
+  el('r-rows').innerHTML = rows.map((r) => {
+    const gestorCol = isAdmin ? `<td class="muted">${escapeHtml(r.gestor || '—')}</td>` : '';
+    const cuenta = r.estado_cuenta === 'Activo'
+      ? '<span class="pill ok">Activo</span>'
+      : r.estado_cuenta === 'Inactivo' ? '<span class="pill falta">Inactivo</span>' : '<span class="muted">—</span>';
+    const estadoT = r.is_baja ? `<span class="pill falta">${escapeHtml(r.estado || 'Baja')}</span>` : `<span class="muted">${escapeHtml(r.estado || '—')}</span>`;
+    return `<tr>
+      <td><div class="name">${escapeHtml(cleanName(r.nombre) || '—')}</div><div class="rid">${r.rider_id}</div></td>
+      ${gestorCol}
+      <td class="muted">${escapeHtml(r.ciudad || '—')}</td>
+      <td class="num">${r.horas_contrato != null ? fmt(r.horas_contrato) : '—'}</td>
+      <td>${estadoT}</td>
+      <td>${cuenta}</td>
+      <td class="muted" style="font-size:12px">${escapeHtml(r.email || '—')}</td>
+    </tr>`;
+  }).join('');
+}
+['r-ciudad', 'r-jornada', 'r-estado', 'r-cuenta'].forEach((id) => el(id).addEventListener('change', loadRiders));
+el('r-search').addEventListener('input', debounce(loadRiders, 250));
+el('r-clear').onclick = () => {
+  ['r-search', 'r-ciudad', 'r-jornada', 'r-estado', 'r-cuenta'].forEach((id) => el(id).value = '');
+  loadRiders();
+};
+el('btn-export-riders').onclick = () => downloadCsv('/riders/export?' + ridersQuery(), 'riders.csv');
+
+// ---------- admin: sincronizar Airtable ----------
+async function loadSyncStatus() {
+  try {
+    const s = await api('/airtable/status');
+    const meta = el('sync-meta');
+    if (!s.configured) {
+      meta.innerHTML = '⚠ Airtable no configurado. Completá token, base ID y tabla en el <code>.env</code> del servidor.';
+      el('btn-sync').disabled = true; el('btn-sync').style.opacity = .5;
+    } else {
+      el('btn-sync').disabled = false; el('btn-sync').style.opacity = 1;
+      meta.textContent = s.last_sync ? 'Última sincronización: ' + s.last_sync : 'Nunca sincronizado.';
+    }
+  } catch {}
+  loadSyncLog();
+}
+async function loadSyncLog() {
+  try {
+    const log = await api('/airtable/log');
+    if (!log.length) { el('sync-log').innerHTML = ''; return; }
+    const rows = log.map((e) => {
+      const estado = e.ok
+        ? '<span class="pill ok">OK</span>'
+        : '<span class="pill falta">error</span>';
+      const detalle = e.ok
+        ? `${e.riders} riders / ${e.registros} reg.`
+        : escapeHtml(e.mensaje || 'error');
+      return `<tr>
+        <td class="muted" style="font-size:11px;white-space:nowrap">${e.started_at}</td>
+        <td>${estado}</td>
+        <td style="font-size:11px">${detalle}</td>
+        <td class="muted" style="font-size:11px">${escapeHtml(e.user_email || '')}</td>
+      </tr>`;
+    }).join('');
+    el('sync-log').innerHTML =
+      `<div class="muted" style="font-size:11px;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Historial de sincronizaciones</div>
+       <div class="table-wrap"><table><tbody>${rows}</tbody></table></div>`;
+  } catch {}
+}
+el('btn-sync').onclick = async () => {
+  setStatus('status-personal', 'Sincronizando con Airtable…', true);
+  el('btn-sync').disabled = true;
+  try {
+    const r = await api('/airtable/sync', { method: 'POST' });
+    setStatus('status-personal', `Personal sincronizado: ${r.riders} riders (${r.registros} registros de Airtable).`, true);
+    if (r.last_sync) el('sync-meta').textContent = 'Última sincronización: ' + r.last_sync;
+    else loadSyncStatus();
+    loadSyncLog();
+    loadWeeks();
+    loadGestores();
+    ridersFiltersLoaded = false;
+  } catch (e) {
+    setStatus('status-personal', e.message, false);
+  } finally {
+    el('btn-sync').disabled = false;
+  }
+};
+el('btn-hours').onclick = () => {
+  const f = el('date-from').value, t = el('date-to').value;
+  if (!f || !t) { setStatus('status-hours', 'Indicá desde y hasta.', false); return; }
+  const extra = { date_from: f, date_to: t, label: el('week-label').value };
+  uploadFile('file-hours', '/import/hours', 'status-hours', (r) => `Semana cargada: ${r.cruzados} cruzados, ${r.sinFicha} sin ficha (${r.filas} filas).`, extra);
+};
+async function uploadFile(inputId, path, statusId, msgFn, extraFields = {}) {
+  const input = el(inputId);
+  if (!input.files.length) { setStatus(statusId, 'Elegí un archivo CSV.', false); return; }
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+  Object.entries(extraFields).forEach(([k, v]) => fd.append(k, v));
+  setStatus(statusId, 'Procesando…', true);
+  try {
+    const r = await fetch(API + path, { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: fd });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    setStatus(statusId, msgFn(data), true);
+    loadWeeks();
+    if (me.role === 'admin') loadGestores();
+  } catch (e) { setStatus(statusId, e.message, false); }
+}
+function setStatus(id, msg, ok) { const n = el(id); n.textContent = msg; n.className = 'status-msg ' + (ok ? 'ok' : 'bad'); }
+
+// ---------- admin: users ----------
+el('nu-role').onchange = () => el('nu-gestor-wrap').style.display = el('nu-role').value === 'gestor' ? '' : 'none';
+async function loadGestores() {
+  try {
+    const gs = await api('/gestores');
+    el('nu-gestor').innerHTML = gs.map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('');
+  } catch {}
+}
+let usersCache = [];
+let editingUserId = null;
+async function loadUsers() {
+  try {
+    usersCache = await api('/users');
+    renderUsers();
+  } catch {}
+}
+function renderUsers() {
+  const q = (el('u-search').value || '').toLowerCase().trim();
+  const list = q
+    ? usersCache.filter((u) =>
+        (u.email || '').toLowerCase().includes(q) ||
+        (u.role || '').toLowerCase().includes(q) ||
+        (u.gestor_name || '').toLowerCase().includes(q))
+    : usersCache;
+  el('u-count').textContent = q
+    ? `${list.length} de ${usersCache.length}`
+    : `${usersCache.length} usuario${usersCache.length === 1 ? '' : 's'}`;
+  el('users-rows').innerHTML = list.map((u) => {
+    const estado = u.active ? '<span class="pill ok">activo</span>' : '<span class="pill falta">inactivo</span>';
+    const isMe = me.id === u.id;
+    return `<tr>
+      <td>${escapeHtml(u.email)}${isMe ? ' <span class="muted">(vos)</span>' : ''}</td>
+      <td><span class="role-badge">${u.role}</span></td>
+      <td class="muted">${u.gestor_name ? escapeHtml(u.gestor_name) : '—'}</td>
+      <td>${estado}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button class="link-btn" data-act="edit" data-id="${u.id}">Editar</button>
+        <button class="link-btn" data-act="toggle" data-id="${u.id}">${u.active ? 'Desactivar' : 'Activar'}</button>
+        <button class="link-btn" data-act="delete" data-id="${u.id}" style="color:var(--falta);border-color:var(--line)">Eliminar</button>
+      </td>
+    </tr>`;
+  }).join('');
+  el('users-rows').querySelectorAll('button[data-act]').forEach((b) => {
+    b.onclick = () => userAction(b.dataset.act, parseInt(b.dataset.id, 10));
+  });
+}
+el('u-search').addEventListener('input', renderUsers);
+
+async function userAction(act, id) {
+  const u = usersCache.find((x) => x.id === id);
+  if (!u) return;
+  if (act === 'edit') return openUserModal(u);
+  if (act === 'toggle') {
+    try {
+      await api('/users/' + id, { method: 'PUT', body: JSON.stringify({ active: u.active ? 0 : 1 }) });
+      toast(u.active ? 'Usuario desactivado' : 'Usuario activado');
+      loadUsers();
+    } catch (e) { alert(e.message); }
+  }
+  if (act === 'delete') {
+    if (!confirm(`¿Eliminar a ${u.email}? Esta acción no se puede deshacer.`)) return;
+    try {
+      await api('/users/' + id, { method: 'DELETE' });
+      toast('Usuario eliminado');
+      loadUsers();
+    } catch (e) { alert(e.message); }
+  }
+}
+
+function openUserModal(u) {
+  editingUserId = u.id;
+  el('um-email').textContent = u.email;
+  el('um-role').value = u.role;
+  el('um-active').checked = !!u.active;
+  el('um-pass').value = '';
+  el('um-status').textContent = '';
+  // poblar gestores en el modal
+  const gsel = el('um-gestor');
+  const opts = Array.from(el('nu-gestor').options).map((o) => o.value);
+  gsel.innerHTML = opts.map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('');
+  if (u.gestor_name) gsel.value = u.gestor_name;
+  el('um-gestor-wrap').style.display = u.role === 'gestor' ? '' : 'none';
+  el('user-modal').classList.remove('hidden');
+}
+el('um-role').onchange = () => el('um-gestor-wrap').style.display = el('um-role').value === 'gestor' ? '' : 'none';
+el('um-cancel').onclick = () => el('user-modal').classList.add('hidden');
+el('um-save').onclick = async () => {
+  const body = {
+    role: el('um-role').value,
+    gestor_name: el('um-gestor').value,
+    active: el('um-active').checked ? 1 : 0,
+  };
+  if (el('um-pass').value.trim()) body.password = el('um-pass').value.trim();
+  try {
+    await api('/users/' + editingUserId, { method: 'PUT', body: JSON.stringify(body) });
+    el('user-modal').classList.add('hidden');
+    toast('Usuario actualizado');
+    loadUsers();
+  } catch (e) { el('um-status').className = 'status-msg bad'; el('um-status').textContent = e.message; }
+};
+el('btn-newuser').onclick = async () => {
+  try {
+    await api('/users', { method: 'POST', body: JSON.stringify({
+      email: el('nu-email').value.trim(), password: el('nu-pass').value,
+      role: el('nu-role').value, gestor_name: el('nu-gestor').value,
+    }) });
+    setStatus('status-user', 'Usuario creado.', true);
+    el('nu-email').value = ''; el('nu-pass').value = '';
+    loadUsers();
+  } catch (e) { setStatus('status-user', e.message, false); }
+};
+
+// ---------- boot ----------
+if (token && me) enterApp();
+</script>
+</body>
+</html>
