@@ -4,7 +4,7 @@ import db from './db.js';
 import { requireAuth, requireAdmin, hashPassword } from './auth.js';
 import { importHours } from './importer.js';
 import { syncPersonalFromAirtable, airtableConfigured, lastSync, getSyncLog } from './airtable.js';
-import { classify, normName } from './utils.js';
+import { classify, normName, round2 } from './utils.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -262,6 +262,83 @@ router.get('/weeks/:weekId/export', (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
   res.send(csv);
+});
+
+// Consolidado de VARIAS semanas: suma por trabajador y total general.
+// ?weeks=1,3,5  (ids de semana)  &  filter/q opcionales (respeta gestor/scoping).
+// Devuelve JSON { semanas, rows, total } — o CSV si ?format=csv.
+router.get('/weeks/consolidated', (req, res) => {
+  const ids = String(req.query.weeks || '')
+    .split(',')
+    .map((x) => parseInt(x, 10))
+    .filter((x) => !isNaN(x));
+  if (ids.length === 0) return res.status(400).json({ error: 'Elegí al menos una semana.' });
+
+  const acc = new Map(); // rider_id -> agregado
+  const semanas = [];
+
+  for (const wid of ids) {
+    const wr = buildWeekRows(wid, req.user, { filter: req.query.filter, q: req.query.q });
+    if (!wr) continue;
+    semanas.push({ id: wid, date_from: wr.week.date_from, date_to: wr.week.date_to, label: wr.week.label });
+    for (const r of wr.rows) {
+      let a = acc.get(r.rider_id);
+      if (!a) {
+        a = {
+          rider_id: r.rider_id, nombre: (r.nombre || '').replace(/\s+/g, ' ').trim(), gestor: r.gestor, ciudad: r.ciudad,
+          semanas: 0, h_trabajadas: 0, horas_descontadas: 0, horas_perdonadas: 0, balance: 0,
+        };
+        acc.set(r.rider_id, a);
+      }
+      a.semanas += 1;
+      a.h_trabajadas += r.h_trabajadas || 0;
+      a.horas_descontadas += r.horas_descontadas || 0;
+      a.horas_perdonadas += r.horas_perdonadas || 0;
+      // Balance neto: la diferencia de cada semana (extras +, faltas −).
+      if (r.diff != null) a.balance += r.diff;
+    }
+  }
+
+  const rows = [...acc.values()]
+    .map((a) => ({
+      ...a,
+      h_trabajadas: round2(a.h_trabajadas),
+      horas_descontadas: round2(a.horas_descontadas),
+      horas_perdonadas: round2(a.horas_perdonadas),
+      balance: round2(a.balance),
+    }))
+    .sort((x, y) => (x.nombre || '').localeCompare(y.nombre || ''));
+
+  // Total general (suma de todos los trabajadores).
+  const total = rows.reduce(
+    (t, r) => ({
+      h_trabajadas: round2(t.h_trabajadas + r.h_trabajadas),
+      horas_descontadas: round2(t.horas_descontadas + r.horas_descontadas),
+      horas_perdonadas: round2(t.horas_perdonadas + r.horas_perdonadas),
+      balance: round2(t.balance + r.balance),
+    }),
+    { h_trabajadas: 0, horas_descontadas: 0, horas_perdonadas: 0, balance: 0 }
+  );
+
+  if (String(req.query.format).toLowerCase() === 'csv') {
+    const headers = [
+      ['rider_id', 'Rider ID'], ['nombre', 'Nombre'], ['gestor', 'Gestor'], ['ciudad', 'Ciudad'],
+      ['semanas', 'Semanas'], ['h_trabajadas', 'Horas trabajadas'],
+      ['horas_descontadas', 'Horas descontadas'], ['horas_perdonadas', 'Horas perdonadas'],
+      ['balance', 'Balance neto'],
+    ];
+    const csvRows = [...rows, {
+      rider_id: '', nombre: 'TOTAL GENERAL', gestor: '', ciudad: '', semanas: '',
+      h_trabajadas: total.h_trabajadas, horas_descontadas: total.horas_descontadas,
+      horas_perdonadas: total.horas_perdonadas, balance: total.balance,
+    }];
+    const csv = toCsv(headers, csvRows);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="consolidado.csv"');
+    return res.send(csv);
+  }
+
+  res.json({ semanas, rows, total });
 });
 
 // ---- Ajustes (justificar / descontar / perdonar) ----
