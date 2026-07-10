@@ -267,7 +267,7 @@ router.get('/weeks/:weekId/export', (req, res) => {
 // Consolidado de VARIAS semanas: suma por trabajador y total general.
 // ?weeks=1,3,5  (ids de semana)  &  filter/q opcionales (respeta gestor/scoping).
 // Devuelve JSON { semanas, rows, total } — o CSV si ?format=csv.
-router.get('/weeks/consolidated', (req, res) => {
+router.get('/weeks/consolidated', requireAdmin, (req, res) => {
   const ids = String(req.query.weeks || '')
     .split(',')
     .map((x) => parseInt(x, 10))
