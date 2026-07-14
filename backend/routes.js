@@ -158,10 +158,24 @@ function buildWeekRows(weekId, user, { filter = 'all', q = '' } = {}) {
     )
     .all();
 
+  // Ajustes guardados de esta semana (para aplicarlos a los "no trabajó" también).
+  const ajustes = {};
+  for (const a of db.prepare('SELECT rider_id, horas_descontadas, horas_perdonadas, justificacion FROM adjustments WHERE week_id = ?').all(weekId)) {
+    ajustes[String(a.rider_id)] = a;
+  }
+
   for (const w of workersActivos) {
     if (idsEnHoras.has(String(w.rider_id))) continue; // ya está (trabajó)
     // Scoping: el gestor solo ve los suyos.
     if (!isAdmin && normName(w.gestor) !== myGestor) continue;
+
+    const aj = ajustes[String(w.rider_id)] || {};
+    const desc = aj.horas_descontadas || 0;
+    const perd = aj.horas_perdonadas || 0;
+    const jornada = w.horas_contrato;
+    // Horas efectivas: 0 trabajadas + perdonadas − descontadas.
+    const efec = round2(0 + perd - desc);
+    const diff = jornada != null ? round2(efec - jornada) : null;
 
     enriched.push({
       rider_id: w.rider_id,
@@ -174,14 +188,14 @@ function buildWeekRows(weekId, user, { filter = 'all', q = '' } = {}) {
       estado_trabajador: w.estado,
       is_baja: !!w.is_baja,
       tiene_ficha: true,
-      jornada: w.horas_contrato,
+      jornada,
       h_trabajadas: 0,
-      horas_descontadas: 0,
-      horas_perdonadas: 0,
-      horas_efectivas: 0,
-      diff: w.horas_contrato != null ? -w.horas_contrato : null,
+      horas_descontadas: desc,
+      horas_perdonadas: perd,
+      horas_efectivas: efec,
+      diff,
       clasificacion: 'no_trabajo',
-      justificacion: '',
+      justificacion: aj.justificacion || '',
       total_pedidos: null,
       incentivo_total: null,
     });
@@ -286,15 +300,19 @@ router.get('/weeks/consolidated', requireAdmin, (req, res) => {
       if (!a) {
         a = {
           rider_id: r.rider_id, nombre: (r.nombre || '').replace(/\s+/g, ' ').trim(), gestor: r.gestor, ciudad: r.ciudad,
-          semanas: 0, h_trabajadas: 0, horas_descontadas: 0, horas_perdonadas: 0, balance: 0,
+          semanas: 0, debio_hacer: 0, h_trabajadas: 0, dif_bruta: 0,
+          horas_descontadas: 0, horas_perdonadas: 0, balance: 0,
         };
         acc.set(r.rider_id, a);
       }
       a.semanas += 1;
+      a.debio_hacer += r.jornada || 0;
       a.h_trabajadas += r.h_trabajadas || 0;
+      // Diferencia bruta: lo trabajado vs lo que debía, SIN los ajustes del gestor.
+      if (r.jornada != null) a.dif_bruta += (r.h_trabajadas || 0) - r.jornada;
       a.horas_descontadas += r.horas_descontadas || 0;
       a.horas_perdonadas += r.horas_perdonadas || 0;
-      // Balance neto: la diferencia de cada semana (extras +, faltas −).
+      // Balance final: la diferencia neta de cada semana (ya incluye los ajustes).
       if (r.diff != null) a.balance += r.diff;
     }
   }
@@ -302,7 +320,9 @@ router.get('/weeks/consolidated', requireAdmin, (req, res) => {
   const rows = [...acc.values()]
     .map((a) => ({
       ...a,
+      debio_hacer: round2(a.debio_hacer),
       h_trabajadas: round2(a.h_trabajadas),
+      dif_bruta: round2(a.dif_bruta),
       horas_descontadas: round2(a.horas_descontadas),
       horas_perdonadas: round2(a.horas_perdonadas),
       balance: round2(a.balance),
@@ -312,25 +332,28 @@ router.get('/weeks/consolidated', requireAdmin, (req, res) => {
   // Total general (suma de todos los trabajadores).
   const total = rows.reduce(
     (t, r) => ({
+      debio_hacer: round2(t.debio_hacer + r.debio_hacer),
       h_trabajadas: round2(t.h_trabajadas + r.h_trabajadas),
+      dif_bruta: round2(t.dif_bruta + r.dif_bruta),
       horas_descontadas: round2(t.horas_descontadas + r.horas_descontadas),
       horas_perdonadas: round2(t.horas_perdonadas + r.horas_perdonadas),
       balance: round2(t.balance + r.balance),
     }),
-    { h_trabajadas: 0, horas_descontadas: 0, horas_perdonadas: 0, balance: 0 }
+    { debio_hacer: 0, h_trabajadas: 0, dif_bruta: 0, horas_descontadas: 0, horas_perdonadas: 0, balance: 0 }
   );
 
   if (String(req.query.format).toLowerCase() === 'csv') {
     const headers = [
       ['rider_id', 'Rider ID'], ['nombre', 'Nombre'], ['gestor', 'Gestor'], ['ciudad', 'Ciudad'],
-      ['semanas', 'Semanas'], ['h_trabajadas', 'Horas trabajadas'],
-      ['horas_descontadas', 'Horas descontadas'], ['horas_perdonadas', 'Horas perdonadas'],
-      ['balance', 'Balance neto'],
+      ['semanas', 'Semanas'], ['debio_hacer', 'Debió hacer'], ['h_trabajadas', 'Horas trabajadas'],
+      ['dif_bruta', 'Diferencia bruta'],
+      ['horas_descontadas', 'Descontadas por gestor'], ['horas_perdonadas', 'Perdonadas por gestor'],
+      ['balance', 'Balance final'],
     ];
     const csvRows = [...rows, {
       rider_id: '', nombre: 'TOTAL GENERAL', gestor: '', ciudad: '', semanas: '',
-      h_trabajadas: total.h_trabajadas, horas_descontadas: total.horas_descontadas,
-      horas_perdonadas: total.horas_perdonadas, balance: total.balance,
+      debio_hacer: total.debio_hacer, h_trabajadas: total.h_trabajadas, dif_bruta: total.dif_bruta,
+      horas_descontadas: total.horas_descontadas, horas_perdonadas: total.horas_perdonadas, balance: total.balance,
     }];
     const csv = toCsv(headers, csvRows);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

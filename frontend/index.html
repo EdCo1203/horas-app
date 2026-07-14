@@ -387,7 +387,7 @@
 
 <!-- ============ MODAL CONSOLIDADO ============ -->
 <div class="modal-bg hidden" id="consol-modal">
-  <div class="modal" style="max-width:820px">
+  <div class="modal" style="max-width:980px">
     <h3>Consolidar semanas</h3>
     <p class="msub">Elegí las semanas a sumar. Extras suman (+) y faltas restan (−) en el balance neto.</p>
     <div id="consol-weeks" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;max-height:120px;overflow:auto"></div>
@@ -547,15 +547,18 @@ function renderConsol(data) {
   const isAdmin = me.role === 'admin';
   const head = `<tr>
     <th>Trabajador</th>${isAdmin ? '<th>Gestor</th>' : ''}<th>Ciudad</th>
-    <th style="text-align:right">Sem.</th><th style="text-align:right">Trabajadas</th>
-    <th style="text-align:right">Desc.</th><th style="text-align:right">Perd.</th>
+    <th style="text-align:right">Sem.</th><th style="text-align:right">Debió</th>
+    <th style="text-align:right">Trabaj.</th><th style="text-align:right">Dif. bruta</th>
+    <th style="text-align:right">Desc. gestor</th><th style="text-align:right">Perd. gestor</th>
     <th style="text-align:right">Balance</th></tr>`;
   const body = data.rows.map((r) => `<tr>
     <td><div class="name">${escapeHtml(cleanName(r.nombre) || '—')}</div>${ridChip(r.rider_id)}</td>
     ${isAdmin ? `<td class="muted">${escapeHtml(r.gestor || '—')}</td>` : ''}
     <td class="muted">${escapeHtml(r.ciudad || '—')}</td>
     <td class="num">${r.semanas}</td>
+    <td class="num">${r.debio_hacer.toFixed(2)}</td>
     <td class="num">${r.h_trabajadas.toFixed(2)}</td>
+    <td class="num">${balCell(r.dif_bruta)}</td>
     <td class="num muted">${r.horas_descontadas ? r.horas_descontadas.toFixed(2) : '·'}</td>
     <td class="num muted">${r.horas_perdonadas ? r.horas_perdonadas.toFixed(2) : '·'}</td>
     <td class="num">${balCell(r.balance)}</td>
@@ -564,7 +567,9 @@ function renderConsol(data) {
   const colspan = isAdmin ? 4 : 3;
   const totalRow = `<tr style="border-top:2px solid var(--line);font-weight:700">
     <td colspan="${colspan}">TOTAL GENERAL (${data.rows.length} trabajadores)</td>
+    <td class="num">${t.debio_hacer.toFixed(2)}</td>
     <td class="num">${t.h_trabajadas.toFixed(2)}</td>
+    <td class="num">${balCell(t.dif_bruta)}</td>
     <td class="num">${t.horas_descontadas.toFixed(2)}</td>
     <td class="num">${t.horas_perdonadas.toFixed(2)}</td>
     <td class="num">${balCell(t.balance)}</td>
