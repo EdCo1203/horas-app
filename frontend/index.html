@@ -221,6 +221,7 @@
         <input type="text" id="search" placeholder="Buscar por nombre o Rider ID…" />
         <button class="link-btn" id="btn-export-horas">↓ Descargar CSV</button>
         <button class="link-btn admin-only" id="btn-consolidado">Σ Consolidar semanas</button>
+        <button class="link-btn" id="btn-comparar">▦ Comparar semanas</button>
       </div>
       <div class="cards" id="cards"></div>
       <div class="table-wrap">
@@ -400,6 +401,22 @@
   </div>
 </div>
 
+<!-- ============ MODAL COMPARAR SEMANAS (matriz) ============ -->
+<div class="modal-bg hidden" id="compare-modal">
+  <div class="modal" style="max-width:95vw">
+    <h3>Comparar semanas</h3>
+    <p class="msub">Elegí semanas para ver cuánto trabajó cada persona en cada una, lado a lado.</p>
+    <div id="compare-weeks" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;max-height:110px;overflow:auto"></div>
+    <div class="modal-actions" style="margin-top:0;margin-bottom:14px">
+      <button class="btn small" id="compare-calc" style="flex:0 0 auto">Ver comparación</button>
+      <input type="text" id="compare-search" placeholder="Buscar nombre o Rider ID…" style="padding:7px 10px;background:var(--surface);border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:13px" />
+      <button class="link-btn" id="compare-download" style="display:none">↓ Descargar CSV</button>
+      <button class="btn secondary small" id="compare-close" style="flex:0 0 auto;margin-left:auto">Cerrar</button>
+    </div>
+    <div id="compare-result" style="max-height:60vh;overflow:auto"></div>
+  </div>
+</div>
+
 <script>
 const API = '/api';
 let token = localStorage.getItem('token') || null;
@@ -538,6 +555,83 @@ el('consol-download').onclick = () => {
   const ids = consolSelectedIds();
   if (ids) downloadCsv('/weeks/consolidated?format=csv&weeks=' + ids, 'consolidado.csv');
 };
+
+// ---------- comparar semanas (matriz por semana) ----------
+let compareWeeksList = [];
+let compareData = null;
+el('btn-comparar').onclick = async () => {
+  try { compareWeeksList = await api('/weeks'); } catch { compareWeeksList = []; }
+  const box = el('compare-weeks');
+  box.innerHTML = compareWeeksList.length
+    ? compareWeeksList.map((w) =>
+        `<label class="week-check" style="cursor:pointer;color:var(--text);font-family:var(--mono);font-size:12px;background:var(--surface-2);border:1px solid var(--line);padding:4px 9px;border-radius:6px">
+           <input type="checkbox" value="${w.id}" style="vertical-align:middle;margin-right:5px">
+           ${(w.label ? w.label + ' · ' : '') + w.date_from + '→' + w.date_to}
+         </label>`).join('')
+    : '<span class="muted">No hay semanas cargadas.</span>';
+  el('compare-result').innerHTML = '';
+  el('compare-download').style.display = 'none';
+  el('compare-modal').classList.remove('hidden');
+};
+el('compare-close').onclick = () => el('compare-modal').classList.add('hidden');
+function compareSelectedIds() {
+  return Array.from(el('compare-weeks').querySelectorAll('input:checked')).map((c) => c.value).join(',');
+}
+el('compare-calc').onclick = async () => {
+  const ids = compareSelectedIds();
+  if (!ids) { el('compare-result').innerHTML = '<p class="muted">Elegí al menos una semana.</p>'; return; }
+  try {
+    compareData = await api('/weeks/matrix?weeks=' + ids);
+    renderCompare(compareData);
+    el('compare-download').style.display = '';
+  } catch (e) { el('compare-result').innerHTML = '<p class="status-msg bad">' + e.message + '</p>'; }
+};
+el('compare-download').onclick = () => {
+  const ids = compareSelectedIds();
+  if (ids) downloadCsv('/weeks/matrix?format=csv&weeks=' + ids, 'comparativo_semanas.csv');
+};
+el('compare-search').addEventListener('input', () => { if (compareData) renderCompare(compareData); });
+function renderCompare(data) {
+  const isAdmin = me.role === 'admin';
+  const q = (el('compare-search').value || '').toLowerCase().trim();
+  let rows = data.rows;
+  if (q) rows = rows.filter((r) => (r.nombre || '').toLowerCase().includes(q) || String(r.rider_id).includes(q));
+
+  // Encabezado: datos fijos + por cada semana (Debió / Trabajó / Just.)
+  let head = `<tr><th>Trabajador</th>${isAdmin ? '<th>Gestor</th>' : ''}<th>Ciudad</th>`;
+  for (const s of data.semanas) {
+    head += `<th colspan="3" style="text-align:center;border-left:1px solid var(--line)">${escapeHtml(s.label)}</th>`;
+  }
+  head += `<th style="text-align:right;border-left:2px solid var(--line)">Tot. debió</th><th style="text-align:right">Tot. trabajó</th><th style="text-align:right">Balance</th></tr>`;
+  let subhead = `<tr><th></th>${isAdmin ? '<th></th>' : ''}<th></th>`;
+  for (const s of data.semanas) {
+    subhead += `<th style="text-align:right;border-left:1px solid var(--line);font-size:10px">Debió</th><th style="text-align:right;font-size:10px">Trabajó</th><th style="text-align:center;font-size:10px">Just.</th>`;
+  }
+  subhead += `<th></th><th></th><th></th></tr>`;
+
+  const body = rows.map((r) => {
+    let cells = `<td><div class="name">${escapeHtml(cleanName(r.nombre) || '—')}</div>${ridChip(r.rider_id)}</td>`;
+    if (isAdmin) cells += `<td class="muted">${escapeHtml(r.gestor || '—')}</td>`;
+    cells += `<td class="muted">${escapeHtml(r.ciudad || '—')}</td>`;
+    for (const s of data.semanas) {
+      const w = r.semanas[s.id];
+      if (!w) {
+        cells += `<td class="num muted" style="border-left:1px solid var(--line)">—</td><td class="num muted">—</td><td class="muted" style="text-align:center">·</td>`;
+      } else {
+        const just = w.justificacion
+          ? `<span title="${escapeHtml(w.justificacion)}" style="cursor:help;color:var(--accent)">✎</span>`
+          : '·';
+        cells += `<td class="num muted" style="border-left:1px solid var(--line)">${w.debio != null ? w.debio.toFixed(2) : '—'}</td><td class="num">${w.trabajadas.toFixed(2)}</td><td class="muted" style="text-align:center">${just}</td>`;
+      }
+    }
+    cells += `<td class="num" style="border-left:2px solid var(--line)">${r.tot_debio.toFixed(2)}</td><td class="num">${r.tot_trab.toFixed(2)}</td><td class="num">${balCell(r.tot_balance)}</td>`;
+    return `<tr>${cells}</tr>`;
+  }).join('');
+
+  el('compare-result').innerHTML =
+    `<div class="muted" style="font-size:12px;margin-bottom:8px">${rows.length} trabajador(es) · ${data.semanas.length} semana(s)</div>
+     <div class="table-wrap" style="overflow:auto"><table><thead>${head}${subhead}</thead><tbody>${body}</tbody></table></div>`;
+}
 function balCell(n) {
   if (n == null) return '—';
   const cls = n > 0 ? 'diff-pos' : n < 0 ? 'diff-neg' : 'diff-zero';

@@ -364,6 +364,86 @@ router.get('/weeks/consolidated', requireAdmin, (req, res) => {
   res.json({ semanas, rows, total });
 });
 
+// Matriz por semana: una fila por persona, con lo de CADA semana lado a lado.
+// Sirve para el admin (consolidado desglosado) y para el gestor (comparar semanas).
+// El scoping lo aplica buildWeekRows (gestor solo ve los suyos).
+// ?weeks=1,3,5  &  format=csv opcional.
+router.get('/weeks/matrix', (req, res) => {
+  const ids = String(req.query.weeks || '')
+    .split(',')
+    .map((x) => parseInt(x, 10))
+    .filter((x) => !isNaN(x));
+  if (ids.length === 0) return res.status(400).json({ error: 'Elegí al menos una semana.' });
+
+  const semanas = [];
+  const acc = new Map(); // rider_id -> { info, porSemana: {weekId: {...}} , totales }
+
+  for (const wid of ids) {
+    const wr = buildWeekRows(wid, req.user, { filter: req.query.filter, q: req.query.q });
+    if (!wr) continue;
+    const label = wr.week.label || `${wr.week.date_from}→${wr.week.date_to}`;
+    semanas.push({ id: wid, label, date_from: wr.week.date_from, date_to: wr.week.date_to });
+
+    for (const r of wr.rows) {
+      let a = acc.get(r.rider_id);
+      if (!a) {
+        a = {
+          rider_id: r.rider_id,
+          nombre: (r.nombre || '').replace(/\s+/g, ' ').trim(),
+          gestor: r.gestor, ciudad: r.ciudad,
+          semanas: {},
+          tot_debio: 0, tot_trab: 0, tot_balance: 0,
+        };
+        acc.set(r.rider_id, a);
+      }
+      a.semanas[wid] = {
+        debio: r.jornada != null ? round2(r.jornada) : null,
+        trabajadas: round2(r.h_trabajadas || 0),
+        descontadas: round2(r.horas_descontadas || 0),
+        perdonadas: round2(r.horas_perdonadas || 0),
+        diff: r.diff,
+        justificacion: r.justificacion || '',
+      };
+      a.tot_debio = round2(a.tot_debio + (r.jornada || 0));
+      a.tot_trab = round2(a.tot_trab + (r.h_trabajadas || 0));
+      if (r.diff != null) a.tot_balance = round2(a.tot_balance + r.diff);
+    }
+  }
+
+  const rows = [...acc.values()].sort((x, y) => (x.nombre || '').localeCompare(y.nombre || ''));
+
+  if (String(req.query.format).toLowerCase() === 'csv') {
+    // Encabezados: datos fijos + por cada semana (debió, trabajó, justificación) + totales.
+    const headers = [['rider_id', 'Rider ID'], ['nombre', 'Nombre'], ['gestor', 'Gestor'], ['ciudad', 'Ciudad']];
+    for (const s of semanas) {
+      headers.push([`s${s.id}_debio`, `${s.label} debió`]);
+      headers.push([`s${s.id}_trab`, `${s.label} trabajó`]);
+      headers.push([`s${s.id}_just`, `${s.label} justificación`]);
+    }
+    headers.push(['tot_debio', 'Total debió']);
+    headers.push(['tot_trab', 'Total trabajó']);
+    headers.push(['tot_balance', 'Balance final']);
+
+    const flat = rows.map((a) => {
+      const o = { rider_id: a.rider_id, nombre: a.nombre, gestor: a.gestor, ciudad: a.ciudad,
+        tot_debio: a.tot_debio, tot_trab: a.tot_trab, tot_balance: a.tot_balance };
+      for (const s of semanas) {
+        const w = a.semanas[s.id] || {};
+        o[`s${s.id}_debio`] = w.debio != null ? w.debio : '';
+        o[`s${s.id}_trab`] = w.trabajadas != null ? w.trabajadas : '';
+        o[`s${s.id}_just`] = w.justificacion || '';
+      }
+      return o;
+    });
+    const csv = toCsv(headers, flat);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="comparativo_semanas.csv"');
+    return res.send(csv);
+  }
+
+  res.json({ semanas, rows });
+});
+
 // ---- Ajustes (justificar / descontar / perdonar) ----
 
 // Guarda o actualiza el ajuste de un rider en una semana.
