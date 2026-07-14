@@ -130,6 +130,8 @@
   .rid-copy svg { width: 11px; height: 11px; opacity: .8; }
   .rid-copy.copied { color: var(--ok); border-color: var(--ok); }
   .sort-arrow { color: var(--accent); font-size: 11px; }
+  .gen-edit { background: none; border: 1px solid var(--line); color: var(--text-dim); cursor: pointer; border-radius: 5px; padding: 1px 6px; font-size: 12px; transition: all .12s; }
+  .gen-edit:hover { border-color: var(--accent); color: var(--accent); }
   .muted { color: var(--text-dim); }
 
   .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
@@ -207,6 +209,7 @@
   </header>
   <nav class="tabs" id="tabs">
     <button class="tab active" data-tab="horas">Horas</button>
+    <button class="tab" data-tab="generales">Horas generales</button>
     <button class="tab" data-tab="riders">Riders</button>
     <button class="tab admin-only" data-tab="cargar">Cargar datos</button>
     <button class="tab admin-only" data-tab="usuarios">Usuarios</button>
@@ -245,6 +248,18 @@
         </table>
       </div>
       <p class="muted" id="rows-empty" style="padding:24px;text-align:center;display:none">No hay filas para este filtro.</p>
+    </section>
+
+    <!-- ---- TAB HORAS GENERALES ---- -->
+    <section id="tab-generales" class="hidden">
+      <p class="msub" style="margin-bottom:12px">Elegí varias semanas para ver y ajustar las horas de cada persona, semana por semana. Hacé clic en una fila para ajustar (descontar / perdonar / justificar) una semana.</p>
+      <div id="gen-weeks" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;max-height:110px;overflow:auto"></div>
+      <div class="controls" style="margin-bottom:12px">
+        <button class="btn small" id="gen-calc" style="flex:0 0 auto">Ver</button>
+        <input type="text" id="gen-search" placeholder="Buscar nombre o Rider ID…" />
+        <button class="link-btn" id="gen-download" style="display:none">↓ Descargar CSV</button>
+      </div>
+      <div id="gen-result"></div>
     </section>
 
     <!-- ---- TAB RIDERS ---- -->
@@ -492,8 +507,9 @@ function enterApp() {
 document.querySelectorAll('.tab').forEach((t) => t.onclick = () => {
   document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
   t.classList.add('active');
-  ['horas', 'riders', 'cargar', 'usuarios'].forEach((name) => el('tab-' + name).classList.toggle('hidden', name !== t.dataset.tab));
+  ['horas', 'generales', 'riders', 'cargar', 'usuarios'].forEach((name) => el('tab-' + name).classList.toggle('hidden', name !== t.dataset.tab));
   if (t.dataset.tab === 'riders') loadRiders();
+  if (t.dataset.tab === 'generales') initGenerales();
 });
 
 // ---------- weeks + rows ----------
@@ -789,9 +805,14 @@ document.addEventListener('click', (e) => {
 });
 
 // ---------- adjust modal ----------
-function openAdjust(rid) {
-  const r = currentRows.find((x) => x.rider_id === rid); if (!r) return;
+let adjWeek = null;      // semana objetivo del ajuste (por defecto la de Horas)
+let adjOnSave = null;    // callback tras guardar
+function openAdjust(rid, opts = {}) {
+  // opts: { row, week, onSave } — si no vienen, usa currentRows y currentWeek (pestaña Horas).
+  const r = opts.row || currentRows.find((x) => x.rider_id === rid); if (!r) return;
   adjTarget = r;
+  adjWeek = opts.week || currentWeek;
+  adjOnSave = opts.onSave || loadRows;
   el('adj-name').textContent = cleanName(r.nombre) || r.rider_id;
   el('adj-info').textContent = `Rider ${r.rider_id} · Jornada ${fmt(r.jornada)}h · Trabajadas ${fmt(r.h_trabajadas)}h`;
   el('adj-desc').value = r.horas_descontadas || 0;
@@ -815,7 +836,7 @@ el('adj-perd').addEventListener('input', recalcAdjust);
 el('adj-cancel').onclick = () => el('adjust-modal').classList.add('hidden');
 el('adj-save').onclick = async () => {
   try {
-    await api(`/weeks/${currentWeek}/rows/${adjTarget.rider_id}/adjust`, {
+    await api(`/weeks/${adjWeek}/rows/${adjTarget.rider_id}/adjust`, {
       method: 'PUT',
       body: JSON.stringify({
         horas_descontadas: parseFloat(el('adj-desc').value) || 0,
@@ -825,11 +846,97 @@ el('adj-save').onclick = async () => {
     });
     el('adjust-modal').classList.add('hidden');
     toast('Ajuste guardado');
-    loadRows();
+    if (adjOnSave) adjOnSave();
   } catch (e) { alert(e.message); }
 };
 
-// ---------- riders (apartado de personal) ----------
+// ---------- Horas generales (matriz + ajustar por semana) ----------
+let genWeeksList = [];
+let genData = null;
+async function initGenerales() {
+  try { genWeeksList = await api('/weeks'); } catch { genWeeksList = []; }
+  const box = el('gen-weeks');
+  box.innerHTML = genWeeksList.length
+    ? genWeeksList.map((w) =>
+        `<label class="week-check" style="cursor:pointer;color:var(--text);font-family:var(--mono);font-size:12px;background:var(--surface-2);border:1px solid var(--line);padding:4px 9px;border-radius:6px">
+           <input type="checkbox" value="${w.id}" style="vertical-align:middle;margin-right:5px">
+           ${(w.label ? w.label + ' · ' : '') + w.date_from + '→' + w.date_to}
+         </label>`).join('')
+    : '<span class="muted">No hay semanas cargadas.</span>';
+}
+function genSelectedIds() {
+  return Array.from(el('gen-weeks').querySelectorAll('input:checked')).map((c) => c.value).join(',');
+}
+el('gen-calc').onclick = async () => {
+  const ids = genSelectedIds();
+  if (!ids) { el('gen-result').innerHTML = '<p class="muted">Elegí al menos una semana.</p>'; return; }
+  try {
+    genData = await api('/weeks/matrix?weeks=' + ids);
+    renderGenerales(genData);
+    el('gen-download').style.display = '';
+  } catch (e) { el('gen-result').innerHTML = '<p class="status-msg bad">' + e.message + '</p>'; }
+};
+el('gen-download').onclick = () => {
+  const ids = genSelectedIds();
+  if (ids) downloadCsv('/weeks/matrix?format=csv&weeks=' + ids, 'horas_generales.csv');
+};
+el('gen-search').addEventListener('input', () => { if (genData) renderGenerales(genData); });
+
+function renderGenerales(data) {
+  const isAdmin = me.role === 'admin';
+  const q = (el('gen-search').value || '').toLowerCase().trim();
+  let rows = data.rows;
+  if (q) rows = rows.filter((r) => (r.nombre || '').toLowerCase().includes(q) || String(r.rider_id).includes(q));
+
+  let head = `<tr><th>Trabajador</th>${isAdmin ? '<th>Gestor</th>' : ''}<th>Ciudad</th>`;
+  for (const s of data.semanas) head += `<th colspan="3" style="text-align:center;border-left:1px solid var(--line)">${escapeHtml(s.label)}</th>`;
+  head += `<th style="text-align:right;border-left:2px solid var(--line)">Tot. debió</th><th style="text-align:right">Tot. trabajó</th><th style="text-align:right">Balance</th></tr>`;
+  let subhead = `<tr><th></th>${isAdmin ? '<th></th>' : ''}<th></th>`;
+  for (const s of data.semanas) subhead += `<th style="text-align:right;border-left:1px solid var(--line);font-size:10px">Debió</th><th style="text-align:right;font-size:10px">Trabajó</th><th style="text-align:center;font-size:10px">Ajustar</th>`;
+  subhead += `<th></th><th></th><th></th></tr>`;
+
+  const body = rows.map((r) => {
+    let cells = `<td><div class="name">${escapeHtml(cleanName(r.nombre) || '—')}</div>${ridChip(r.rider_id)}</td>`;
+    if (isAdmin) cells += `<td class="muted">${escapeHtml(r.gestor || '—')}</td>`;
+    cells += `<td class="muted">${escapeHtml(r.ciudad || '—')}</td>`;
+    for (const s of data.semanas) {
+      const w = r.semanas[s.id];
+      if (!w) {
+        cells += `<td class="num muted" style="border-left:1px solid var(--line)">—</td><td class="num muted">—</td><td style="text-align:center">·</td>`;
+      } else {
+        const hasJust = w.justificacion ? ` style="color:var(--extra)"` : '';
+        // Botón lápiz para ajustar ESTA semana de ESTA persona.
+        const btn = `<button class="gen-edit" data-rid="${r.rider_id}" data-week="${s.id}" title="${w.justificacion ? escapeHtml(w.justificacion) : 'Ajustar esta semana'}"${hasJust}>✎</button>`;
+        cells += `<td class="num muted" style="border-left:1px solid var(--line)">${w.debio != null ? w.debio.toFixed(2) : '—'}</td><td class="num">${w.trabajadas.toFixed(2)}</td><td style="text-align:center">${btn}</td>`;
+      }
+    }
+    cells += `<td class="num" style="border-left:2px solid var(--line)">${r.tot_debio.toFixed(2)}</td><td class="num">${r.tot_trab.toFixed(2)}</td><td class="num">${balCell(r.tot_balance)}</td>`;
+    return `<tr>${cells}</tr>`;
+  }).join('');
+
+  el('gen-result').innerHTML =
+    `<div class="muted" style="font-size:12px;margin-bottom:8px">${rows.length} trabajador(es) · ${data.semanas.length} semana(s)</div>
+     <div class="table-wrap" style="overflow:auto"><table><thead>${head}${subhead}</thead><tbody>${body}</tbody></table></div>`;
+
+  // Enganchar los botones de ajustar por semana.
+  el('gen-result').querySelectorAll('.gen-edit').forEach((b) => {
+    b.onclick = () => openGenAdjust(b.dataset.rid, parseInt(b.dataset.week, 10));
+  });
+}
+
+// Abre el cuadro de ajuste para una persona en una semana específica (desde la matriz).
+function openGenAdjust(rid, weekId) {
+  const person = genData.rows.find((x) => x.rider_id === rid); if (!person) return;
+  const w = person.semanas[weekId] || {};
+  // Armar un "row" compatible con el modal de ajuste.
+  const row = {
+    rider_id: rid, nombre: person.nombre, jornada: w.debio,
+    h_trabajadas: w.trabajadas || 0,
+    horas_descontadas: w.descontadas || 0, horas_perdonadas: w.perdonadas || 0,
+    justificacion: w.justificacion || '',
+  };
+  openAdjust(rid, { row, week: weekId, onSave: () => el('gen-calc').click() });
+}
 let ridersFiltersLoaded = false;
 function ridersQuery() {
   const p = new URLSearchParams();
