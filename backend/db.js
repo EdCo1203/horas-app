@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS workers (
   estado_cuenta   TEXT,             -- Activo / Inactivo (estado de la cuenta de Glovo)
   horas_contrato  REAL,            -- hrsDeContratoNum
   is_baja         INTEGER NOT NULL DEFAULT 0,
+  en_airtable     INTEGER NOT NULL DEFAULT 1,   -- 1 = vino en la última sync, 0 = ya no está en Airtable
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_workers_gestor ON workers(gestor);
@@ -110,5 +111,15 @@ CREATE TABLE IF NOT EXISTS adjustments (
   UNIQUE(week_id, rider_id)
 );
 `);
+
+// Migración: agregar columna en_airtable si la base ya existía sin ella.
+try {
+  const cols = db.prepare(`PRAGMA table_info(workers)`).all();
+  if (!cols.some((c) => c.name === 'en_airtable')) {
+    db.exec(`ALTER TABLE workers ADD COLUMN en_airtable INTEGER NOT NULL DEFAULT 1`);
+  }
+} catch (e) {
+  // si algo falla, no rompemos el arranque
+}
 
 export default db;

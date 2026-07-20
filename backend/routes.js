@@ -524,7 +524,7 @@ function queryRiders(user, query = {}) {
   return db
     .prepare(
       `SELECT rider_id, nombre, gestor, email, region AS ciudad, vehiculo,
-              estado, estado_cuenta, horas_contrato, is_baja
+              estado, estado_cuenta, horas_contrato, is_baja, en_airtable
        FROM workers ${where}
        ORDER BY nombre`
     )

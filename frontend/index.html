@@ -16,12 +16,12 @@
     --text-faint: #5b6675;
     --accent: #4f9dde;
     --accent-dim: #2d5f85;
-    --extra: #e0a641;      /* horas de más */
-    --extra-bg: #2a2312;
+    --extra: #4bb377;      /* horas de más → verde */
+    --extra-bg: #12241a;
     --falta: #e0614f;      /* horas de menos */
     --falta-bg: #2a1614;
-    --ok: #4bb377;         /* en jornada */
-    --ok-bg: #12241a;
+    --ok: #4f9dde;         /* en jornada → azul */
+    --ok-bg: #12202e;
     --sinficha: #8b7bd8;
     --sinficha-bg: #1e1a2e;
     --baja: #6b7685;
@@ -853,6 +853,7 @@ el('adj-save').onclick = async () => {
 // ---------- Horas generales (matriz + ajustar por semana) ----------
 let genWeeksList = [];
 let genData = null;
+let genSort = { dir: 0 }; // 0 = sin orden, 1 = menor a mayor, -1 = mayor a menor
 async function initGenerales() {
   try { genWeeksList = await api('/weeks'); } catch { genWeeksList = []; }
   const box = el('gen-weeks');
@@ -887,14 +888,17 @@ function renderGenerales(data) {
   const q = (el('gen-search').value || '').toLowerCase().trim();
   let rows = data.rows;
   if (q) rows = rows.filter((r) => (r.nombre || '').toLowerCase().includes(q) || String(r.rider_id).includes(q));
+  // Orden por balance (clic en el encabezado).
+  if (genSort.dir) {
+    rows = [...rows].sort((a, b) => ((a.tot_balance || 0) - (b.tot_balance || 0)) * genSort.dir);
+  }
 
   let head = `<tr><th>Trabajador</th>${isAdmin ? '<th>Gestor</th>' : ''}<th>Ciudad</th>`;
   for (const s of data.semanas) head += `<th colspan="3" style="text-align:center;border-left:1px solid var(--line)">${escapeHtml(s.label)}</th>`;
-  head += `<th style="text-align:right;border-left:2px solid var(--line)">Tot. debió</th><th style="text-align:right">Tot. trabajó</th><th style="text-align:right">Balance</th></tr>`;
+  head += `<th style="text-align:right;border-left:2px solid var(--line)">Tot. debió</th><th style="text-align:right">Tot. trabajó</th><th style="text-align:right;cursor:pointer;user-select:none" id="th-gen-balance" title="Ordenar por balance">Balance <span class="sort-arrow">${genSort.dir === 1 ? '↑' : genSort.dir === -1 ? '↓' : ''}</span></th></tr>`;
   let subhead = `<tr><th></th>${isAdmin ? '<th></th>' : ''}<th></th>`;
   for (const s of data.semanas) subhead += `<th style="text-align:right;border-left:1px solid var(--line);font-size:10px">Debió</th><th style="text-align:right;font-size:10px">Trabajó</th><th style="text-align:center;font-size:10px">Ajustar</th>`;
   subhead += `<th></th><th></th><th></th></tr>`;
-
   const body = rows.map((r) => {
     let cells = `<td><div class="name">${escapeHtml(cleanName(r.nombre) || '—')}</div>${ridChip(r.rider_id)}</td>`;
     if (isAdmin) cells += `<td class="muted">${escapeHtml(r.gestor || '—')}</td>`;
@@ -922,6 +926,12 @@ function renderGenerales(data) {
   el('gen-result').querySelectorAll('.gen-edit').forEach((b) => {
     b.onclick = () => openGenAdjust(b.dataset.rid, parseInt(b.dataset.week, 10));
   });
+  // Ordenar por balance al hacer clic en el encabezado.
+  const thBal = el('th-gen-balance');
+  if (thBal) thBal.onclick = () => {
+    genSort.dir = genSort.dir === -1 ? 1 : -1; // primer clic: mayor a menor
+    renderGenerales(genData);
+  };
 }
 
 // Abre el cuadro de ajuste para una persona en una semana específica (desde la matriz).
@@ -997,7 +1007,9 @@ function renderRiders(rows) {
     const cuenta = r.estado_cuenta === 'Activo'
       ? '<span class="pill ok">Activo</span>'
       : r.estado_cuenta === 'Inactivo' ? '<span class="pill falta">Inactivo</span>' : '<span class="muted">—</span>';
-    const estadoT = r.is_baja ? `<span class="pill falta">${escapeHtml(r.estado || 'Baja')}</span>` : `<span class="muted">${escapeHtml(r.estado || '—')}</span>`;
+    const estadoT = r.en_airtable === 0
+      ? `<span class="pill falta" title="Ya no está en la vista de Airtable">Fuera de Airtable</span>`
+      : r.is_baja ? `<span class="pill falta">${escapeHtml(r.estado || 'Baja')}</span>` : `<span class="muted">${escapeHtml(r.estado || '—')}</span>`;
     return `<tr>
       <td><div class="name">${escapeHtml(cleanName(r.nombre) || '—')}</div><div style="margin-top:3px">${ridChip(r.rider_id)}</div></td>
       ${gestorCol}

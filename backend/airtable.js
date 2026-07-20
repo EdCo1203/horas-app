@@ -174,16 +174,17 @@ export async function syncPersonalFromAirtable(user = {}) {
   }
 
   const upsert = db.prepare(`
-    INSERT INTO workers (rider_id, nombre, gestor, email, region, vehiculo, estado, estado_cuenta, horas_contrato, is_baja, updated_at)
-    VALUES (@rider_id, @nombre, @gestor, @email, @region, @vehiculo, @estado, @estado_cuenta, @horas_contrato, @is_baja, datetime('now'))
+    INSERT INTO workers (rider_id, nombre, gestor, email, region, vehiculo, estado, estado_cuenta, horas_contrato, is_baja, en_airtable, updated_at)
+    VALUES (@rider_id, @nombre, @gestor, @email, @region, @vehiculo, @estado, @estado_cuenta, @horas_contrato, @is_baja, 1, datetime('now'))
     ON CONFLICT(rider_id) DO UPDATE SET
       nombre=excluded.nombre, gestor=excluded.gestor, email=excluded.email,
       region=excluded.region, vehiculo=excluded.vehiculo, estado=excluded.estado,
       estado_cuenta=excluded.estado_cuenta, horas_contrato=excluded.horas_contrato,
-      is_baja=excluded.is_baja, updated_at=datetime('now')
+      is_baja=excluded.is_baja, en_airtable=1, updated_at=datetime('now')
   `);
 
   let riders = 0;
+  const vistos = new Set(); // rider_ids que vinieron de Airtable en esta sync
   try {
     const tx = db.transaction((recs) => {
       for (const rec of recs) {
@@ -202,8 +203,19 @@ export async function syncPersonalFromAirtable(user = {}) {
             horas_contrato: m.horas_contrato,
             is_baja: m.is_baja,
           });
+          vistos.add(String(id));
           riders++;
         }
+      }
+
+      // Marcar como "fuera de Airtable" a los que ya NO vinieron en esta sync.
+      // No se borran (para conservar horas/justificaciones); se marcan como baja.
+      const previos = db.prepare('SELECT rider_id FROM workers').all();
+      const markOut = db.prepare(
+        `UPDATE workers SET en_airtable = 0, is_baja = 1, updated_at = datetime('now') WHERE rider_id = ?`
+      );
+      for (const p of previos) {
+        if (!vistos.has(String(p.rider_id))) markOut.run(p.rider_id);
       }
     });
     tx(records);
@@ -212,15 +224,17 @@ export async function syncPersonalFromAirtable(user = {}) {
     throw e;
   }
 
+  const fueraDeAirtable = db.prepare('SELECT count(*) c FROM workers WHERE en_airtable = 0').get().c;
+
   // Registrar la fecha de la última sincronización.
   db.prepare(
     `INSERT INTO meta (key, value) VALUES ('last_sync', datetime('now'))
      ON CONFLICT(key) DO UPDATE SET value=datetime('now')`
   ).run();
 
-  logResult(true, records.length, riders, `${riders} riders desde ${records.length} registros`);
+  logResult(true, records.length, riders, `${riders} riders desde ${records.length} registros` + (fueraDeAirtable ? ` · ${fueraDeAirtable} fuera de Airtable` : ''));
 
-  return { registros: records.length, riders };
+  return { registros: records.length, riders, fueraDeAirtable };
 }
 
 // Devuelve el historial de sincronizaciones (más recientes primero).
