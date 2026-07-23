@@ -211,6 +211,7 @@
     <button class="tab active" data-tab="horas">Horas</button>
     <button class="tab" data-tab="generales">Horas generales</button>
     <button class="tab" data-tab="riders">Riders</button>
+    <button class="tab admin-only" data-tab="incentivos">Incentivos</button>
     <button class="tab admin-only" data-tab="cargar">Cargar datos</button>
     <button class="tab admin-only" data-tab="usuarios">Usuarios</button>
   </nav>
@@ -260,6 +261,20 @@
         <button class="link-btn" id="gen-download" style="display:none">↓ Descargar CSV</button>
       </div>
       <div id="gen-result"></div>
+    </section>
+
+    <!-- ---- TAB INCENTIVOS ---- -->
+    <section id="tab-incentivos" class="hidden">
+      <p class="msub" style="margin-bottom:12px">Incentivos generados por cada rider. Elegí las semanas a sumar (o tocá "Todas").</p>
+      <div id="inc-weeks" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;max-height:110px;overflow:auto"></div>
+      <div class="controls" style="margin-bottom:12px">
+        <button class="btn small" id="inc-calc" style="flex:0 0 auto">Ver</button>
+        <button class="link-btn" id="inc-all">Todas las semanas</button>
+        <input type="text" id="inc-search" placeholder="Buscar nombre o Rider ID…" />
+        <button class="link-btn" id="inc-download" style="display:none">↓ Descargar CSV</button>
+      </div>
+      <div id="inc-cards" class="cards" style="margin-bottom:14px"></div>
+      <div id="inc-result"></div>
     </section>
 
     <!-- ---- TAB RIDERS ---- -->
@@ -320,6 +335,7 @@
             <div class="status-msg" id="status-hours"></div>
           </div>
         </div>
+        <div id="upload-log" style="margin-top:20px"></div>
       </div>
     </section>
 
@@ -507,9 +523,11 @@ function enterApp() {
 document.querySelectorAll('.tab').forEach((t) => t.onclick = () => {
   document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
   t.classList.add('active');
-  ['horas', 'generales', 'riders', 'cargar', 'usuarios'].forEach((name) => el('tab-' + name).classList.toggle('hidden', name !== t.dataset.tab));
+  ['horas', 'generales', 'riders', 'incentivos', 'cargar', 'usuarios'].forEach((name) => el('tab-' + name).classList.toggle('hidden', name !== t.dataset.tab));
   if (t.dataset.tab === 'riders') loadRiders();
   if (t.dataset.tab === 'generales') initGenerales();
+  if (t.dataset.tab === 'incentivos') initIncentivos();
+  if (t.dataset.tab === 'cargar') loadUploadLog();
 });
 
 // ---------- weeks + rows ----------
@@ -947,6 +965,102 @@ function openGenAdjust(rid, weekId) {
   };
   openAdjust(rid, { row, week: weekId, onSave: () => el('gen-calc').click() });
 }
+
+// ---------- incentivos (solo admin) ----------
+let incWeeksList = [];
+let incData = null;
+async function initIncentivos() {
+  try { incWeeksList = await api('/weeks'); } catch { incWeeksList = []; }
+  el('inc-weeks').innerHTML = incWeeksList.length
+    ? incWeeksList.map((w) =>
+        `<label class="week-check" style="cursor:pointer;color:var(--text);font-family:var(--mono);font-size:12px;background:var(--surface-2);border:1px solid var(--line);padding:4px 9px;border-radius:6px">
+           <input type="checkbox" value="${w.id}" style="vertical-align:middle;margin-right:5px">
+           ${(w.label ? w.label + ' · ' : '') + w.date_from + '→' + w.date_to}
+         </label>`).join('')
+    : '<span class="muted">No hay semanas cargadas.</span>';
+}
+function incSelectedIds() {
+  return Array.from(el('inc-weeks').querySelectorAll('input:checked')).map((c) => c.value).join(',');
+}
+async function loadIncentivos(weeksParam) {
+  try {
+    incData = await api('/weeks/incentivos?weeks=' + weeksParam);
+    renderIncentivos(incData);
+    el('inc-download').style.display = '';
+    el('inc-download').dataset.weeks = weeksParam;
+  } catch (e) { el('inc-result').innerHTML = '<p class="status-msg bad">' + e.message + '</p>'; }
+}
+el('inc-calc').onclick = () => {
+  const ids = incSelectedIds();
+  if (!ids) { el('inc-result').innerHTML = '<p class="muted">Elegí al menos una semana (o tocá "Todas las semanas").</p>'; return; }
+  loadIncentivos(ids);
+};
+el('inc-all').onclick = () => {
+  el('inc-weeks').querySelectorAll('input').forEach((c) => c.checked = true);
+  loadIncentivos('all');
+};
+el('inc-download').onclick = () => {
+  const w = el('inc-download').dataset.weeks || incSelectedIds();
+  if (w) downloadCsv('/weeks/incentivos?format=csv&weeks=' + w, 'incentivos.csv');
+};
+el('inc-search').addEventListener('input', () => { if (incData) renderIncentivos(incData); });
+function eur(n) { return (n || 0).toFixed(2) + ' €'; }
+function renderIncentivos(data) {
+  const q = (el('inc-search').value || '').toLowerCase().trim();
+  let rows = data.rows;
+  if (q) rows = rows.filter((r) => (r.nombre || '').toLowerCase().includes(q) || String(r.rider_id).includes(q));
+
+  el('inc-cards').innerHTML = `
+    <div class="card"><span class="bar" style="background:var(--extra)"></span><div class="n">${eur(data.total.incentivo)}</div><div class="l">Incentivo total</div></div>
+    <div class="card"><span class="bar" style="background:var(--accent)"></span><div class="n">${data.total.pedidos}</div><div class="l">Pedidos totales</div></div>
+    <div class="card"><span class="bar" style="background:var(--ok)"></span><div class="n">${data.rows.length}</div><div class="l">Riders</div></div>
+    <div class="card"><span class="bar" style="background:var(--baja)"></span><div class="n">${data.semanas.length}</div><div class="l">Semanas</div></div>`;
+
+  const body = rows.map((r) => `<tr>
+    <td><div class="name">${escapeHtml(cleanName(r.nombre) || '—')}</div>${ridChip(r.rider_id)}</td>
+    <td class="muted">${escapeHtml(r.gestor || '—')}</td>
+    <td class="muted">${escapeHtml(r.ciudad || '—')}</td>
+    <td class="num">${r.semanas}</td>
+    <td class="num">${r.pedidos}</td>
+    <td class="num muted">${r.h_trabajadas.toFixed(2)}</td>
+    <td class="num" style="color:var(--extra);font-weight:600">${eur(r.incentivo)}</td>
+  </tr>`).join('');
+  const t = data.total;
+  const totalRow = `<tr style="border-top:2px solid var(--line);font-weight:700">
+    <td colspan="4">TOTAL GENERAL (${data.rows.length} riders)</td>
+    <td class="num">${t.pedidos}</td>
+    <td class="num">${t.h_trabajadas.toFixed(2)}</td>
+    <td class="num" style="color:var(--extra)">${eur(t.incentivo)}</td>
+  </tr>`;
+  el('inc-result').innerHTML =
+    `<div class="muted" style="font-size:12px;margin-bottom:8px">${rows.length} rider(s) · ${data.semanas.length} semana(s)</div>
+     <div class="table-wrap"><table>
+       <thead><tr><th>Rider</th><th>Gestor</th><th>Ciudad</th><th style="text-align:right">Sem.</th><th style="text-align:right">Pedidos</th><th style="text-align:right">Horas</th><th style="text-align:right">Incentivo €</th></tr></thead>
+       <tbody>${body}${totalRow}</tbody></table></div>`;
+}
+
+// ---------- historial de subidas de archivos ----------
+async function loadUploadLog() {
+  try {
+    const log = await api('/import/log');
+    if (!log.length) { el('upload-log').innerHTML = ''; return; }
+    const rows = log.map((e) => `<tr>
+      <td class="muted" style="font-size:11px;white-space:nowrap">${e.subido_at}</td>
+      <td style="font-size:12px">${escapeHtml(e.filename || '—')}</td>
+      <td class="muted" style="font-size:11px">${escapeHtml((e.week_label ? e.week_label + ' · ' : '') + (e.date_from || '') + '→' + (e.date_to || ''))}</td>
+      <td class="num" style="font-size:11px">${e.filas ?? '—'}</td>
+      <td class="num muted" style="font-size:11px">${e.cruzados ?? '—'}</td>
+      <td class="num muted" style="font-size:11px">${e.sin_ficha ?? '—'}</td>
+      <td class="muted" style="font-size:11px">${escapeHtml(e.user_email || '')}</td>
+    </tr>`).join('');
+    el('upload-log').innerHTML =
+      `<div class="muted" style="font-size:11px;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Historial de archivos subidos</div>
+       <div class="table-wrap"><table>
+         <thead><tr><th>Fecha</th><th>Archivo</th><th>Semana</th><th style="text-align:right">Filas</th><th style="text-align:right">Cruz.</th><th style="text-align:right">S/ficha</th><th>Subido por</th></tr></thead>
+         <tbody>${rows}</tbody></table></div>`;
+  } catch {}
+}
+
 let ridersFiltersLoaded = false;
 function ridersQuery() {
   const p = new URLSearchParams();
@@ -1089,7 +1203,10 @@ el('btn-hours').onclick = () => {
   const f = el('date-from').value, t = el('date-to').value;
   if (!f || !t) { setStatus('status-hours', 'Indicá desde y hasta.', false); return; }
   const extra = { date_from: f, date_to: t, label: el('week-label').value };
-  uploadFile('file-hours', '/import/hours', 'status-hours', (r) => `Semana cargada: ${r.cruzados} cruzados, ${r.sinFicha} sin ficha (${r.filas} filas).`, extra);
+  uploadFile('file-hours', '/import/hours', 'status-hours', (r) => {
+    loadUploadLog();
+    return `Semana cargada: ${r.cruzados} cruzados, ${r.sinFicha} sin ficha (${r.filas} filas).`;
+  }, extra);
 };
 async function uploadFile(inputId, path, statusId, msgFn, extraFields = {}) {
   const input = el(inputId);

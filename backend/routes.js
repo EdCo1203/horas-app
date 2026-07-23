@@ -60,10 +60,29 @@ router.post('/import/hours', requireAdmin, upload.single('file'), (req, res) => 
       filename: req.file.originalname,
       userId: req.user.id,
     });
+    // Registrar la subida en el historial.
+    db.prepare(
+      `INSERT INTO upload_log (filename, week_id, week_label, date_from, date_to, filas, cruzados, sin_ficha, user_id, user_email)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      req.file.originalname, result.weekId, label || null, date_from, date_to,
+      result.filas ?? null, result.cruzados ?? null, result.sinFicha ?? null,
+      req.user.id, req.user.email
+    );
     res.json({ ok: true, ...result });
   } catch (e) {
     res.status(400).json({ error: 'Error importando horas: ' + e.message });
   }
+});
+
+// Historial de subidas de archivos de horas (solo admin).
+router.get('/import/log', requireAdmin, (req, res) => {
+  res.json(
+    db.prepare(
+      `SELECT id, subido_at, filename, week_label, date_from, date_to, filas, cruzados, sin_ficha, user_email
+       FROM upload_log ORDER BY id DESC LIMIT 50`
+    ).all()
+  );
 });
 
 // ---- Filas de una semana (vista principal) ----
@@ -442,6 +461,74 @@ router.get('/weeks/matrix', (req, res) => {
   }
 
   res.json({ semanas, rows });
+});
+
+// Incentivos por rider, sumando las semanas elegidas (solo admin).
+// ?weeks=1,2,3  (o weeks=all para todas)  &  format=csv opcional.
+router.get('/weeks/incentivos', requireAdmin, (req, res) => {
+  const raw = String(req.query.weeks || '');
+  let ids;
+  if (raw.toLowerCase() === 'all' || raw === '') {
+    ids = db.prepare('SELECT id FROM weeks ORDER BY date_from').all().map((w) => w.id);
+  } else {
+    ids = raw.split(',').map((x) => parseInt(x, 10)).filter((x) => !isNaN(x));
+  }
+  if (ids.length === 0) return res.status(400).json({ error: 'No hay semanas para calcular.' });
+
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db
+    .prepare(
+      `SELECT h.rider_id,
+              COUNT(DISTINCT h.week_id)      AS semanas,
+              SUM(COALESCE(h.total_pedidos,0))   AS pedidos,
+              SUM(COALESCE(h.incentivo_total,0)) AS incentivo,
+              SUM(COALESCE(h.h_trabajadas,0))    AS h_trabajadas,
+              w.nombre, w.gestor, w.region AS ciudad
+       FROM hours h
+       LEFT JOIN workers w ON w.rider_id = h.rider_id
+       WHERE h.week_id IN (${placeholders})
+       GROUP BY h.rider_id
+       ORDER BY incentivo DESC`
+    )
+    .all(...ids)
+    .map((r) => ({
+      ...r,
+      nombre: (r.nombre || '').replace(/\s+/g, ' ').trim(),
+      pedidos: r.pedidos || 0,
+      incentivo: round2(r.incentivo || 0),
+      h_trabajadas: round2(r.h_trabajadas || 0),
+    }));
+
+  const semanas = db
+    .prepare(`SELECT id, label, date_from, date_to FROM weeks WHERE id IN (${placeholders}) ORDER BY date_from`)
+    .all(...ids);
+
+  const total = rows.reduce(
+    (t, r) => ({
+      pedidos: t.pedidos + r.pedidos,
+      incentivo: round2(t.incentivo + r.incentivo),
+      h_trabajadas: round2(t.h_trabajadas + r.h_trabajadas),
+    }),
+    { pedidos: 0, incentivo: 0, h_trabajadas: 0 }
+  );
+
+  if (String(req.query.format).toLowerCase() === 'csv') {
+    const headers = [
+      ['rider_id', 'Rider ID'], ['nombre', 'Nombre'], ['gestor', 'Gestor'], ['ciudad', 'Ciudad'],
+      ['semanas', 'Semanas'], ['pedidos', 'Total pedidos'], ['h_trabajadas', 'Horas trabajadas'],
+      ['incentivo', 'Incentivo total €'],
+    ];
+    const csvRows = [...rows, {
+      rider_id: '', nombre: 'TOTAL GENERAL', gestor: '', ciudad: '', semanas: '',
+      pedidos: total.pedidos, h_trabajadas: total.h_trabajadas, incentivo: total.incentivo,
+    }];
+    const csv = toCsv(headers, csvRows);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="incentivos.csv"');
+    return res.send(csv);
+  }
+
+  res.json({ semanas, rows, total });
 });
 
 // ---- Ajustes (justificar / descontar / perdonar) ----

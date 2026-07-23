@@ -99,6 +99,21 @@ CREATE TABLE IF NOT EXISTS sync_log (
   user_email  TEXT
 );
 
+CREATE TABLE IF NOT EXISTS upload_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  subido_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  filename    TEXT,
+  week_id     INTEGER,
+  week_label  TEXT,
+  date_from   TEXT,
+  date_to     TEXT,
+  filas       INTEGER,
+  cruzados    INTEGER,
+  sin_ficha   INTEGER,
+  user_id     INTEGER REFERENCES users(id),
+  user_email  TEXT
+);
+
 CREATE TABLE IF NOT EXISTS adjustments (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   week_id        INTEGER NOT NULL REFERENCES weeks(id) ON DELETE CASCADE,
